@@ -54,6 +54,7 @@ randomSleep        = False
 localTesting       = False
 
 
+
 if not localTesting:
     port        = serial.Serial('/dev/ttyAMA0', baudrate=9600, timeout=0.1)
 
@@ -964,7 +965,7 @@ def count_remaining_keys(xmpp):
 
 def search_keyfiles():
     keyfiles  = []
-    keyfiles += [each for each in os.listdir('.') if each.endswith('.e')]
+    keyfiles += [file for file in os.listdir('.') if file.endswith('.e')]
     if not keyfiles:
         exit_with_msg('Error: No keyfiles for contacts were found.\n'
                       'Make sure keyfiles are in same directory as Tx.py.')
@@ -1274,52 +1275,52 @@ def print_help():
         print ''
 
     else:
-        print       'List of commands:'
-        print       ' /about'                                      + 16 * ' ' + 'Show information about software'
+        print     'List of commands:'
+        print     ' /about'                                      + 16 * ' ' + 'Show information about software'
         if emergencyExit:
-            print   ' /clear'                                      + 16 * ' ' + 'Clear screens'
-            print   ' \'  \' (2x spacebar) '                                  + 'Emergency exit'
+            print ' /clear'                                      + 16 * ' ' + 'Clear screens'
+            print ' \'  \' (2x spacebar) '                                  + 'Panic exit'
         else:
-            print   ' /clear & \'  \''                             +  9 * ' ' + 'Clear screens'
-        print       ' /file <file name>'                           +  5 * ' ' + 'Send file to recipient'
-        print       ' /help'                                       + 17 * ' ' + 'Display this list of commands'
-        print       ' /logging <on/off>'                           +  5 * ' ' + 'Enable/disable logging on Rx.py'
-        print       ' /msg <ID/xmpp/group>'                        +  2 * ' ' + 'Change recipient'
-        print       ' /names'                                      + 16 * ' ' + 'Displays available contacts'
-        print       ' /nick <nick>'                                + 10 * ' ' + 'Change contact\'s nickname on Tx.py & Rx.py'
-        print       ' /paste'                                      + 16 * ' ' + 'Enable paste-mode'
-        print       ' /quit & /exit'                               +  9 * ' ' + 'Exits TFC'
-        print       ' Shift + PgUp/PgDn'                           +  5 * ' ' + 'Scroll terminal up/down'
+            print ' /clear & \'  \''                             +  9 * ' ' + 'Clear screens'
+        print     ' /file <file name>'                           +  5 * ' ' + 'Send file to recipient'
+        print     ' /help'                                       + 17 * ' ' + 'Display this list of commands'
+        print     ' /logging <on/off>'                           +  5 * ' ' + 'Enable/disable logging on Rx.py'
+        print     ' /msg <ID/xmpp/group>'                        +  2 * ' ' + 'Change recipient'
+        print     ' /names'                                      + 16 * ' ' + 'Displays available contacts'
+        print     ' /nick <nick>'                                + 10 * ' ' + 'Change contact\'s nickname on Tx.py & Rx.py'
+        print     ' /paste'                                      + 16 * ' ' + 'Enable paste-mode'
+        print     ' /quit & /exit'                               +  9 * ' ' + 'Exits TFC'
+        print     ' Shift + PgUp/PgDn'                           +  5 * ' ' + 'Scroll terminal up/down'
 
         print ttyW * '-'
-        print       ' /groups'                                     + 15 * ' ' + 'List currently available groups and their members'
-        print       ' /group'                                      + 16 * ' ' + 'List group members'
-        print       ' /group <group name>'                         +  3 * ' ' + 'Select group\n'
+        print     ' /groups'                                     + 15 * ' ' + 'List currently available groups and their members'
+        print     ' /group'                                      + 16 * ' ' + 'List group members'
+        print     ' /group <group name>'                         +  3 * ' ' + 'Select group\n'
 
-        print       ' /group create <group name> <xmpp 1> <xmpp 2> .. <xmpp n>\n' \
+        print     ' /group create <group name> <xmpp 1> <xmpp 2> .. <xmpp n>\n' \
                     ' Create new group named <group name>, add xmpp-addresses.\n'
 
-        print       ' /group add <group name> <xmpp 1> <xmpp 2> .. <xmpp n>\n' \
+        print     ' /group add <group name> <xmpp 1> <xmpp 2> .. <xmpp n>\n' \
                     ' Add xmpp-addresses to group <group name>\n'
 
-        print       ' /group rm <group name> <xmpp 1> <xmpp 2> .. <xmpp n>\n' \
-                    ' Remove xmpp-addresses from group <group name>.'
+        print     ' /group rm <group name> <xmpp 1> <xmpp 2> .. <xmpp n>\n' \
+                  ' Remove xmpp-addresses from group <group name>.'
 
         print ttyW * '-' + '\n'
 
-        print       ' /store <tmp file name> <output file name>\n '   +  41 * '-' + '\n'\
-                    ' Decodes automatically saved received file <temp file name>\n'    \
-                    ' and stores it as <output file name>. Shreds <temp file name>.\n\n'
+        print     ' /store <tmp file name> <output file name>\n '   +  41 * '-' + '\n'\
+                  ' Decodes automatically saved received file <temp file name>\n'    \
+                  ' and stores it as <output file name>. Shreds <temp file name>.\n\n'
 
-        print       ' /newkf tx alice@jabber.org 2.kf\n '          + 31 * '-'
-        print       ' Overwrites keyfile me.alice@jabber.org used to send messages to\n' \
-                    ' alice@jabber.org. Switches to keyfile 2.kf on TxM and me.2.kf on\n'\
-                    ' RxM and resets keyID number in txc.tfc on TxM and rxc.tfc on RxM.\n'
+        print     ' /newkf tx alice@jabber.org 2.kf\n '          + 31 * '-'
+        print     ' Overwrites keyfile me.alice@jabber.org used to send messages to\n' \
+                  ' alice@jabber.org. Switches to keyfile 2.kf on TxM and me.2.kf on\n'\
+                  ' RxM and resets keyID number in txc.tfc on TxM and rxc.tfc on RxM.\n'
 
-        print       ' /newkf rx alice@jabber.org 3.kf\n '          + 31 * '-'
-        print       ' Overwrites keyfile rx.alice@jabber.org used to receive messages\n'\
-                    ' from alice@jabber.org. Switches to keyfile rx.3.kf on RxM and\n'  \
-                    ' resets keyID number in rxc.tfc on RxM.\n\n'
+        print     ' /newkf rx alice@jabber.org 3.kf\n '          + 31 * '-'
+        print     ' Overwrites keyfile rx.alice@jabber.org used to receive messages\n'\
+                  ' from alice@jabber.org. Switches to keyfile rx.3.kf on RxM and\n'  \
+                  ' resets keyID number in rxc.tfc on RxM.\n\n'
 
 
 
@@ -1386,7 +1387,7 @@ def select_contact(maxWidth='', idSelDist='', contactNo='', menu=True):
                 if ttyW < maxWidth:
                     selection = raw_input('\nSelect ID:  ')
                 else:
-                    selection = raw_input('\nSelect contact:' + (idSelDist - len('Select contact') - 1) * ' ')
+                    selection = raw_input('\nSelect contact:' + (idSelDist - 15) * ' ')
 
                 intSelection = int(selection)
             else:
@@ -1624,7 +1625,7 @@ def get_group_members(groupName, output=True):
 
         if not groupList and output:
             os.system('clear')
-            print '\nGroup is empty. Add contacts to group with command\n   /group add <group name> <xmpp>\n'
+            print 'Group is empty. Add contacts to group with command\n   /group add <group name> <xmpp>\n'
 
         return groupList
 
@@ -1678,12 +1679,15 @@ while True:
     if pastemode:
         try:
             os.system('clear')
-            print 'You\'re now in paste mode:\n'\
-                  '2x ^D sends message.\n'      \
-                  '   ^C exits paste mode.\n'   \
-                  'Paste content to ' + nick + ':\n'
+            print 'Paste mode on || 2x ^D sends message || ^C exits\n' \
+                  'Msg to ' + nick + ':\n'
+            try:
+                lines     = sys.stdin.readlines()
+            except IOError:
+                print '\nError in STDIO. Please try again.\n'
+                time.sleep(1)
+                continue
 
-            lines     = sys.stdin.readlines()
             userInput = '\n' + ''.join(lines)
             print '\nSending...'
             time.sleep(0.1)

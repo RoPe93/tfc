@@ -58,6 +58,7 @@ PkgSize            = 140
 
 localTesting       = False
 
+
 if not localTesting:
     port        = serial.Serial('/dev/ttyAMA0', baudrate=9600, timeout=0.1)
 
@@ -1059,6 +1060,7 @@ def store_file(preName, fileName):
         return None
 
     if fileName != 'r':
+        os.system('clear')
         subprocess.Popen('base64 -d f.' + preName + '.tfc > ' + fileName, shell=True).wait()
         print '\nStored tmp file \'f.' + preName + '.tfc\' as \'' + fileName + '\'.'
         subprocess.Popen('shred -n ' + str(kfOWIterations) + ' -z -u f.' + preName + '.tfc', shell=True).wait()
@@ -1066,10 +1068,11 @@ def store_file(preName, fileName):
         disp_opsec_warning()
 
     else:
+        os.system('clear')
         subprocess.Popen('shred -n ' + str(kfOWIterations) + ' -z -u f.' + preName + '.tfc', shell=True).wait()
         print 'Temporary file \'f.' + preName + '.tfc\' was rejected and overwritten.\n'
 
-    return None
+
 
 
 
