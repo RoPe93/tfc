@@ -17,8 +17,8 @@ from time import sleep
 #                             LICENCE                                #
 ######################################################################
 
-# TFC-CEV (Cascading Encryption Version) || Rx.py
-version = 'CEV 0.4.13 beta'
+# TFC (OTP Version) || Rx.py
+version = '0.4.13 beta'
 
 """
 This software is part of the TFC application, which is free software:
@@ -52,6 +52,9 @@ displayTime        = True
 logTimeStampFmt    = '%Y-%m-%d / %H:%M:%S'
 displayTimeFmt     = '%H:%M'
 kfOWIterations     = 3
+shredIterations    = 3
+keyThreshold       = 5
+PkgSize            = 140
 
 localTesting       = False
 
@@ -458,446 +461,86 @@ def keccak_256(hashInput):
 
 
 
-def keccak_decrypt(ciphertext, HexKey):
+######################################################################
+#                         CRYPTOGRAPHY RELATED                       #
+######################################################################
 
-    # CTR mode, no authentication.
-
-    # Convert hexadecimal key to binary data.
-    key        = binascii.unhexlify(HexKey)
-
-    # Separate 256-bit nonce from ciphertext.
-    nonce      = ciphertext[:32]
-    ciphertext = ciphertext[32:]
-
-    # Generate 512-bit IV.
-    iv         = (key + nonce)
-
-    # Sponge function takes 512-bit IV, squeezes out 256 bit keystream block #1.
-    step       = keccak_256(iv)
-
-    i          = 0
-    keystream  = ''
-
-    # For n-byte message, n/32 additional rounds is needed to generate proper length keystream.
-    while i < (len(ciphertext) / 32):
-        keystream += step
-        step       = keccak_256(key + step)
-        i         += 1
-
-    # Convert key from hex format to binary.
-    keystreamBIN = binascii.unhexlify(keystream)
-
-    # XOR keystream with plaintext to acquire ciphertext.
-    if len(ciphertext) == len(keystreamBIN):
-        plaintext = ''.join(chr(ord(msgLetter) ^ ord(keyLetter)) for msgLetter, keyLetter in zip(ciphertext, keystreamBIN))
+def otp_decrypt(ciphertext, key):
+    if len(ciphertext) == len(key):
+        plaintext = ''.join(chr(ord(encLetter) ^ ord(keyLetter)) for encLetter, keyLetter in zip(ciphertext, key))
     else:
-        os.system('clear')
-        print '\nCRITICAL ERROR! Keccak ciphertext - keystream length mismatch. Exiting.\n'
-        exit()
-
-    # Remove padding.
-    plaintext      = plaintext[:-ord(plaintext[-1:])]
-
+        exit_with_msg('CRITICAL ERROR! Ciphertext - key length mismatch.')
     return plaintext
 
 
 
-######################################################################
-#                        SALSA20 STREAM CIPHER                       #
-######################################################################
+def equals(item1, item2):
 
-"""
-This file is part of Python Salsa20
-a Python bridge to the libsodium C [X]Salsa20 library
-Released under The BSD 3-Clause License
+    # Constant time function for MAC comparing
+    if len(item1) != len(item2):
+        return False
+    result = 0
+    for x, y in zip(item1, item2):
+        result |= ord(x) ^ ord(y)
+    return result == 0
 
-Copyright (c) 2013 Keybase
-Python module and ctypes bindings
-"""
 
-import imp
-from ctypes import (cdll, c_char_p, c_int, c_uint64, create_string_buffer)
-from ctypes import (cdll, Structure, POINTER, pointer, c_char_p, c_int, c_uint32, create_string_buffer)
 
+def one_time_mac(key1, key2, ciphertext):
 
-_salsa20 = cdll.LoadLibrary(imp.find_module('_salsa20')[1])
+    # One-time MAC calculation is done modulo M521, the 13th, 521-bit Mersenne prime.
+    q = 6864797660130609714981900799081393217269435300143305409394463459185543183397656052122559640661454554977296311391480858037121987999716643812574028291115057151
 
+    if debugging:
+        print 'M(one_time_mac):'
 
-_stream_salsa20 = _salsa20.exp_stream_salsa20
-_stream_salsa20.argtypes = [  c_char_p,  # unsigned char * c
-                              c_uint64,  # unsigned long long clen
-                              c_char_p,  # const unsigned char * n
-                              c_char_p   # const unsigned char * k
-                           ]
-_stream_salsa20.restype = c_int
 
-_stream_salsa20_xor = _salsa20.exp_stream_salsa20_xor
-_stream_salsa20_xor.argtypes = [  c_char_p,  # unsigned char * c
-                                  c_char_p,  # const unsigned char *m
-                                  c_uint64,  # unsigned long long mlen
-                                  c_char_p,  # const unsigned char * n
-                                  c_char_p   # const unsigned char * k
-                               ]
-_stream_salsa20_xor.restype = c_int
+    # Convert ciphertext to 64 byte array.
+    ctArray = [ciphertext[i:i + 64] for i in range(0, len(ciphertext), 64)]
 
-_stream_xsalsa20 = _salsa20.exp_stream_xsalsa20
-_stream_xsalsa20.argtypes = [  c_char_p,  # unsigned char * c
-                               c_uint64,  # unsigned long long clen
-                               c_char_p,  # const unsigned char * n
-                               c_char_p   # const unsigned char * k
-                            ]
-_stream_xsalsa20.restype = c_int
 
-_stream_xsalsa20_xor = _salsa20.exp_stream_xsalsa20_xor
-_stream_xsalsa20_xor.argtypes = [  c_char_p,  # unsigned char * c
-                                   c_char_p,  # const unsigned char *m
-                                   c_uint64,  # unsigned long long mlen
-                                   c_char_p,  # const unsigned char * n
-                                   c_char_p   # const unsigned char * k
-                                ]
-_stream_xsalsa20_xor.restype = c_int
+    # Convert key to integer and reduce the integer value to range [0, q]
+    key1    = int(key1.encode('hex_codec'), 16) % q
+    key2    = int(key2.encode('hex_codec'), 16) % q
 
-IS_PY2 = sys.version_info < (3, 0, 0, 'final', 0)
 
-
-
-def _ensure_bytes(data):
-    if (IS_PY2 and not isinstance(data, str)) or (not IS_PY2 and not isinstance(data, bytes)):
-        raise TypeError('can not encrypt/decrypt unicode objects')
-
-
-
-def Salsa20_keystream(length, nonce, key):
-    _ensure_bytes(nonce)
-    _ensure_bytes(key)
-    if not len(key) == 32: raise ValueError('invalid key length')
-    if not len(nonce) == 8: raise ValueError('invalid nonce length')
-    if not length > 0: raise ValueError('invalid length')
-
-    outbuf = create_string_buffer(length)
-    _stream_salsa20(outbuf, length, nonce, key)
-    return outbuf.raw
-
-
-
-def Salsa20_xor(message, nonce, key):
-    _ensure_bytes(nonce)
-    _ensure_bytes(key)
-    _ensure_bytes(message)
-    if not len(key) == 32: raise ValueError('invalid key length')
-    if not len(nonce) == 8: raise ValueError('invalid nonce length')
-    if not len(message) > 0: raise ValueError('invalid message length')
-
-    outbuf = create_string_buffer(len(message))
-    _stream_salsa20_xor(outbuf, message, len(message), nonce, key)
-    return outbuf.raw
-
-
-
-def XSalsa20_keystream(length, nonce, key):
-    _ensure_bytes(nonce)
-    _ensure_bytes(key)
-    if not len(key) == 32: raise ValueError('invalid key length')
-    if not len(nonce) == 24: raise ValueError('invalid nonce length')
-    if not length > 0: raise ValueError('invalid length')
-
-    outbuf = create_string_buffer(length)
-    _stream_xsalsa20(outbuf, length, nonce, key)
-    return outbuf.raw
-
-
-
-def XSalsa20_xor(message, nonce, key):
-    _ensure_bytes(nonce)
-    _ensure_bytes(key)
-    _ensure_bytes(message)
-    if not len(key) == 32: raise ValueError('invalid key length')
-    if not len(nonce) == 24: raise ValueError('invalid nonce length')
-    if not len(message) > 0: raise ValueError('invalid message length')
-
-    outbuf = create_string_buffer(len(message))
-    _stream_xsalsa20_xor(outbuf, message, len(message), nonce, key)
-    return outbuf.raw
-
-
-
-def salsa_20_decrypt(ciphertext, hexKey):
-
-    # Separate nonce from ciphertext.
-    nonce      = ciphertext[:24]
-    ciphertext = ciphertext[24:]
-
-    # Convert hexadecimal key to bitstring.
-    key        = binascii.unhexlify(hexKey)
-
-    # XOR ciphertext with keystream to acquire plaintext.
-    plaintext  = XSalsa20_xor(ciphertext, nonce, key)
-
-    return plaintext
-
-
-
-######################################################################
-#                        TWOFISH BLOCK CIPHER                        #
-######################################################################
-
-"""
-This file is part of Python Twofish a Python bridge to the C Twofish library by Niels Ferguson
-Released under The BSD 3-Clause License
-Copyright (c) 2013 Keybase
-Python module and ctypes bindings
-"""
-
-import imp
-
-_twofish = cdll.LoadLibrary(imp.find_module('_twofish')[1])
-
-
-
-class _Twofish_key(Structure):
-    _fields_ = [("s", (c_uint32 * 4) * 256),
-                ("K", c_uint32 * 40)]
-
-_Twofish_initialise = _twofish.exp_Twofish_initialise
-_Twofish_initialise.argtypes = []
-_Twofish_initialise.restype = None
-
-_Twofish_prepare_key = _twofish.exp_Twofish_prepare_key
-_Twofish_prepare_key.argtypes = [ c_char_p,  # uint8_t key[]
-                                  c_int,     # int key_len
-                                  POINTER(_Twofish_key) ]
-_Twofish_prepare_key.restype = None
-
-_Twofish_encrypt = _twofish.exp_Twofish_encrypt
-_Twofish_encrypt.argtypes = [ POINTER(_Twofish_key),
-                              c_char_p,     # uint8_t p[16]
-                              c_char_p      # uint8_t c[16]
-                            ]
-_Twofish_encrypt.restype = None
-
-_Twofish_decrypt = _twofish.exp_Twofish_decrypt
-_Twofish_decrypt.argtypes = [ POINTER(_Twofish_key),
-                              c_char_p,     # uint8_t c[16]
-                              c_char_p      # uint8_t p[16]
-                            ]
-_Twofish_decrypt.restype = None
-
-_Twofish_initialise()
-
-IS_PY2 = sys.version_info < (3, 0, 0, 'final', 0)
-
-
-
-def _ensure_bytes(data):
-    if (IS_PY2 and not isinstance(data, str)) or (not IS_PY2 and not isinstance(data, bytes)):
-        raise TypeError('can not encrypt/decrypt unicode objects')
-
-
-
-class Twofish():
-    def __init__(self, key):
-        if not len(key) > 0 and len(key) <= 32:
-            raise ValueError('invalid key length')
-        _ensure_bytes(key)
-
-        self.key = _Twofish_key()
-        _Twofish_prepare_key(key, len(key), pointer(self.key))
-
-
-
-    def encrypt(self, data):
-        if not len(data) == 16:
-            raise ValueError('invalid block length')
-        _ensure_bytes(data)
-
-        outbuf = create_string_buffer(len(data))
-        _Twofish_encrypt(pointer(self.key), data, outbuf)
-        return outbuf.raw
-
-
-
-    def decrypt(self, data):
-        if not len(data) == 16:
-            raise ValueError('invalid block length')
-        _ensure_bytes(data)
-
-        outbuf = create_string_buffer(len(data))
-        _Twofish_decrypt(pointer(self.key), data, outbuf)
-        return outbuf.raw
-
-
-
-def self_test():
-    # Repeat the test on the same vectors checked at runtime by the library
-    # 128-bit test is the I=3 case of section B.2 of the Twofish book.
-    t128 = ('9F589F5CF6122C32B6BFEC2F2AE8C35A',
-        'D491DB16E7B1C39E86CB086B789F5419',
-        '019F9809DE1711858FAAC3A3BA20FBC3')
-
-    # 192-bit test is the I=4 case of section B.2 of the Twofish book.
-    t192 = ('88B2B2706B105E36B446BB6D731A1E88EFA71F788965BD44',
-        '39DA69D6BA4997D585B6DC073CA341B2',
-        '182B02D81497EA45F9DAACDC29193A65')
-
-    # 256-bit test is the I=4 case of section B.2 of the Twofish book.
-    t256 = ('D43BB7556EA32E46F2A282B7D45B4E0D57FF739D4DC92C1BD7FC01700CC8216F',
-        '90AFE91BB288544F2C32DC239B2635E6',
-        '6CB4561C40BF0A9705931CB6D408E7FA')
-
-    for t in (t128, t192, t256):
-        k = binascii.unhexlify(t[0])
-        p = binascii.unhexlify(t[1])
-        c = binascii.unhexlify(t[2])
-
-        T = Twofish(k)
-        if not T.encrypt(p) == c or not T.decrypt(c) == p:
-            exit_with_msg('CRITICAL ERROR! Twofish library is corrupted.')
-
-# Perform Twofish library self-test.
-self_test()
-
-
-
-def twofish_decrypt(ciphertext, HexKey):
-
-    # Separate nonce from ciphertext.
-    nonce          = ciphertext[:16]
-    ciphertext     = ciphertext[16:]
-
-    # Convert hexadecimal key to binary data.
-    key            = binascii.unhexlify(HexKey)
-
-    # n.o. keystream blocks equals the n.o. CT blocks.
-    ctArray        = [ciphertext[i:i + 16] for i in range(0, len(ciphertext), 16)]
-
-    keystream      = ''
-    counter        = 1
-
+    # Convert ciphertext array to integer array.
+    iA      = []
     for block in ctArray:
-
-        # Hash the counter value and output 64 hex numbers.
-        counterHash = keccak_256(str(counter))
-
-        # Convert the digest to 32-bit binary.
-        counterBin  = binascii.unhexlify(counterHash)
-
-        # Truncate length to 128 bits.
-        ctr         = counterBin[:16]
-
-        # XOR 128-bit nonce with 128-bit hash of counter to create IV of Twofish cipher.
-        if len(ctr) == 16 and len(nonce) == 16:
-            iv       = ''.join(chr(ord(msgLetter) ^ ord(keyLetter)) for msgLetter, keyLetter in zip(ctr, nonce))
-        else:
-            exit_with_msg('CRITICAL ERROR! Twofish counter hash - nonce length mismatch. Exiting.')
-
-        # Initialize Twofish cipher with key.
-        E           = Twofish(key)
-
-        # Encrypt unique IV with key.
-        keyBlock    = E.encrypt(iv)
-
-        # Append new block to keystream.
-        keystream  += keyBlock
-
-        # Increase the counter of randomized CTR mode.
-        counter    += 1
-
-    # XOR keystream with ciphertext to acquire plaintext.
-    if len(ciphertext) == len(keystream):
-        plaintext = ''.join(chr(ord(msgLetter) ^ ord(keyLetter)) for msgLetter, keyLetter in zip(ciphertext, keystream))
-    else:
-        exit_with_msg('CRITICAL ERROR! Twofish ciphertext - keystream length mismatch.')
-
-    # Remove padding.
-    plaintext = plaintext[:-ord(plaintext[-1:])]
-
-    return plaintext
+        binFormat = ''.join(format(ord(x), 'b') for x in block)
+        intFormat = int(binFormat, 2)
+        iA.append(intFormat)
 
 
-
-######################################################################
-#     AES (GCM) AUTHENTICATED ENCRYPTION (RIJNDAEL BLOCK CIPHER)     #
-######################################################################
-
-"""
-#  Cipher/AES.py : AES
-# ===================================================================
-# The contents of this file are dedicated to the public domain.  To
-# the extent that dedication to the public domain is not available,
-# everyone is granted a worldwide, perpetual, royalty-free,
-# non-exclusive license to exercise all rights associated with the
-# contents of this file for any purpose whatsoever.
-# No rights are reserved.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
-
-# EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
-# MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
-# NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS
-# BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN
-
-# ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
-# CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-# SOFTWARE.
-
-PyCrypto licence (https://raw.githubusercontent.com/dlitz/pycrypto/master/COPYRIGHT)
-To the best of our knowledge, with the exceptions noted below or
-within the files themselves, the files that constitute PyCrypto are in
-the public domain. Most are distributed with the following notice:
-The contents of this file are dedicated to the public domain. To
-the extent that dedication to the public domain is not available,
-everyone is granted a worldwide, perpetual, royalty-free,
-non-exclusive license to exercise all rights associated with the
-contents of this file for any purpose whatsoever.
-No rights are reserved.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
-EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
-MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
-NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS
-BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN
-ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
-CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-"""
-
-from Crypto.Cipher import AES
-
-try:
-    import Crypto.Random.random
-    secure_random = Crypto.Random.random.getrandbits
-
-except ImportError:
-    import OpenSSL
-    print 'WARNING Failed to import Crypto.Random, trying OpenSSL instead.'
-    secure_random = lambda x: long(hexlify(OpenSSL.rand.bytes(x>>3)), 16)
+    # Number of blocks, highest block index.
+    b = len(iA)
 
 
+    # Print block values.
+    if debugging:
+        print '\nCiphertext integer values:\n'
+        for block in iA:
+            print 'Block ' + str(iA.index(block) + 1) + ' (Length = ' + str(len(str(block))) + ')'
+            print str(block) + '\n'
+        print ''
 
-def AES_GCM_decrypt(ctInput, hexKey):
 
-    nonce      = ctInput[:64]
-    ciphertext = ctInput[64:-16]
-    mac        = ctInput[-16:]
+    #  Calculate MAC.
+    n = 0
+    while b > 0:
+        n = n + ( iA[b-1] * (key1 ** b) )
+        b -= 1
+    MAC = (n + key2) % q
 
-    AESkey     = binascii.unhexlify(hexKey)
-    cipher     = AES.new(AESkey, AES.MODE_GCM, nonce)
-    cipher.update('')
 
-    plaintext  = cipher.decrypt(ciphertext)
+    # Convert int to hex and remove '0x' from start and 'L' from end of string.
+    MAC = str(hex(MAC))[2:][:-1]
 
-    try:
-        cipher.verify(mac)
-        return plaintext
 
-    except ValueError:
-        os.system('clear')
-        print "\nWARNING! MAC verification failed! This might mean someone is tampering your messages!\n"
-        return None
+    if debugging:
+        print '\nFinished MAC:\n"' + MAC + '"\n\n'
 
-    except TypeError:
-        os.system('clear')
-        print "\nWARNING! MAC verification failed! This might mean someone is tampering your messages!\n"
-        return None
+    return MAC
 
 
 
@@ -905,90 +548,57 @@ def AES_GCM_decrypt(ctInput, hexKey):
 #                    DECRYPTION AND KEY MANAGEMENT                   #
 ######################################################################
 
-def get_keyset(xmpp, output=True):
+def get_keyset(xmpp, keyID, output):
     try:
-        keySet = []
-
-        with open(xmpp + '.e', 'r') as file:
-            keyFile = file.readlines()
-
-        for line in keyFile:
-            key = line.strip('\n')
-
-            # Verify keys in keyfile have proper hex-format.
-            validChars = ['0','1','2','3','4','5','6','7','8','9','A',
-                          'B','C','D','E','F','a','b','c','d','e','f']
-
-            for char in key:
-                if not char in validChars:
-                    exit_with_msg('CRITICAL ERROR! Illegal char \'' + str(char) + '\' in keyfile\n' + xmpp + '.e.')
-
-
-            # Verify keys are of proper length.
-            if len(key) != 64:
-                exit_with_msg('CRITICAL ERROR! Illegal length key in keyfile\n' + xmpp + '.e. Exiting.')
-            else:
-                keySet.append(key)
-
-        # Verify that four keys were loaded.
-        if len(keySet) != 4:
-            exit_with_msg('CRITICAL ERROR! Keyfile ' + xmpp + '.e\nhas illegal number of keys.')
-
-        # Verify that all keys are unique.
-        if any(keySet.count(key) > 1 for key in keySet):
-            exit_with_msg('CRITICAL ERROR! Two identical keys in keyfile\n' + xmpp + '.e.')
-
-        if debugging and output:
-            print '\nM(get_keyset): Loaded following set of keys for XMPP' + xmpp + '\n'
-            for key in keySet:
-                print key
-
-        return keySet
-
-    except IOError:
-        exit_with_msg('CRITICAL ERROR! Failed to open keyfile for XMPP\n' + xmpp + '.')
-
-
-
-def rotate_keyset(xmpp, keySet):
-    try:
-
-        newKeys = []
-        with open(xmpp + '.e', 'w+') as file:
-            for key in keySet:
-                newKey = keccak_256(key)
-                newKeys.append(newKey)
-                file.write(newKey + '\n')
-
-        if debugging:
-            print '\nM(rotate_keyset): Wrote following keys for contact ' + xmpp + '\n'
-            for key in newKeys:
-                print key
-
-        # Verify that keys were successfully written.
-        storedKeySet = get_keyset(xmpp, False)
-
-        if newKeys != storedKeySet:
-            exit_with_msg('CRITICAL ERROR! Next keyset was not properly stored.')
+        # Verify keyID value is valid.
+        if keyID < 1:
+            exit_with_msg('CRITICAL ERROR! KeyID was not valid.')
 
         else:
-            if debugging:
-                print '\nM(rotate_keys): Key overwriting successful.\n'
+            offset = (keyID * 3 * PkgSize)
+
+        # Load encryption key from file.
+        with open(xmpp + '.e', 'rb') as file:
+            file.seek(offset)
+            entropy = file.read(3 * PkgSize)
+
+
+        # Verify that key is not overwritten.
+        if (keyThreshold * '!') in entropy:
+            exit_with_msg('CRITICAL ERROR! Loaded key the threshold of \'!\' chars exceeds limit.')
+
+
+        # Convert entropy into keyset.
+        keyset = [entropy[i:i + PkgSize] for i in range(0, len(entropy), PkgSize )]
+
+
+        # Verify there are 3 keys.
+        if len(keyset) != 3:
+            return None
+
+        # Print key.
+        if debugging and output:
+            print '\nM(get_keyset): Loaded following key set (keyID = ' + str(keyID) + ') from offset ' + str(offset) + ' for XMPP ' + xmpp + ':'
+
+            for key in keyset:
+                print binascii.hexlify(key) + ' (Hex representation)\n'
+
+        return keyset
 
     except IOError:
-        exit_with_msg('CRITICAL ERROR! Keyfile ' + xmpp + '.e\ncould not be loaded.')
+        exit_with_msg('CRITICAL ERROR! Could not open keyfile of XMPP ' + xmpp + '.')
 
 
 
-def decrypt(xmpp, ct4, keyID):
-
-    # Load expected keyset.
-    keySet       = get_keyset(xmpp)
+def auth_and_decrypt(xmpp, ctWithTag, keyID):
 
     # Calculate offset of contact's keyset.
     storedKeyID  = int(get_keyID(xmpp))
     contactKeyID = int(keyID)
     offset       = contactKeyID - storedKeyID
+
+    # Load announced keyset.
+    keyset = get_keyset(xmpp, contactKeyID, True)
 
 
     if offset > 0:
@@ -1001,28 +611,76 @@ def decrypt(xmpp, ct4, keyID):
         else:
             print '\nATTENTION! The last ' + str(offset) + ' messages have not\nbeen received from ' + xmpp[3:] + '.\n'
 
-        # Iterate keyset through Keccak hash function until there is no offset.
-        i = 0
-        while i < offset:
-            n = 0
-            while n < 4:
-                keySet[n] = keccak_256(keySet[n])
-                n += 1
-            i+=1
+    offset = 0
 
-    # Decrypt ciphertext.
-    ct3 = AES_GCM_decrypt  (ct4, keySet[3])
-    ct2 = twofish_decrypt  (ct3, keySet[2])
-    ct1 = salsa_20_decrypt (ct2, keySet[1])
-    pt  = keccak_decrypt   (ct1, keySet[0])
+    # Separate ciphertext and MAC.
+    ciphertext = ctWithTag[:PkgSize]
+    MAC        = ctWithTag[PkgSize:]
 
-    # Store next keyset.
-    rotate_keyset(xmpp, keySet)
+    # Remove padding from MAC.
+    packetMAC     = depadding(MAC)
 
-    # Store keyID.
-    write_keyID(xmpp, contactKeyID + 1)
+    # Calculate MAC from ciphertext
+    calculatedMAC = one_time_mac(keyset[1], keyset[2], ciphertext)
 
-    return pt
+    # Compare MACs using constant time function.
+    if equals(packetMAC, calculatedMAC):
+
+        if debugging:
+            print '\nM(decrypt): Message was succesfully authenticated.\n'
+
+        # Decrypt ciphertext.
+        plaintext = otp_decrypt(ciphertext, keyset[0])
+
+        # Remove padding from plaintext.
+        plaintext = depadding(plaintext)
+
+        while storedKeyID <= contactKeyID:
+            overwrite_key(xmpp, storedKeyID)
+            write_keyID(xmpp, storedKeyID + 1)
+            storedKeyID = get_keyID(xmpp)
+        return True, plaintext
+
+    else:
+        return False, ''
+
+
+
+def overwrite_key(xmpp, keyID):
+    if keyID < 1:
+        exit_with_msg('Error: KeyID was not greater than 0! Check your contacts.tfc file.')
+    else:
+        offset = keyID * PkgSize
+
+    if debugging:
+        print 'M(overwrite_enc_key):\nOverwriting ' + str(PkgSize) + ' bytes from offset ' + str(offset) + ' (keyID ' + str(keyID) + ')\n'
+        print 'M(overwrite_enc_key): Hex-representation of key before overwriting:'
+        subprocess.Popen('hexdump -s' + str(offset) + ' -n ' + str(PkgSize) + ' ' + xmpp + '.e| cut -c 9-', shell=True).wait()
+    i = 0
+
+    while i < kfOWIterations:
+        if debugging:
+            print 'M(overwrite_enc_key): Overwriting key with random data (iteration ' + str(i + 1) + ')'
+        subprocess.Popen('dd if=/dev/urandom of=' + xmpp + '.e bs=1 seek=' + str(offset) + ' count=' + str(PkgSize) + ' conv=notrunc > /dev/null 2>&1', shell=True).wait()
+
+        if debugging:
+            print 'M(overwrite_enc_key): Done. Hex-representation of key after overwriting:'
+            subprocess.Popen('hexdump -s' + str(offset) + ' -n ' + str(PkgSize) + ' ' + xmpp + '.e| cut -c 9-', shell=True).wait()
+        i +=1
+
+    with open(xmpp + '.e', 'rb+') as eFile:
+        eFile.seek(offset)
+        eFile.write(PkgSize * '!')
+        eFile.seek(offset)
+        owCandidate = eFile.read(PkgSize)
+        while owCandidate != (PkgSize * '!'):
+            print '\nWARNING! Key overwrite failed, trying again\n'
+            eFile.seek(offset)
+            eFile.write(PkgSize * '!')
+            eFile.seek(offset)
+            owCandidate = eFile.read(PkgSize)
+        if debugging:
+            print '\nM(overwrite_key): Overwriting completed.\n'
 
 
 
@@ -1253,6 +911,27 @@ YOUR LIFE DEPENDS ON IT, THE PRINTER AND SCANNER AS WELL.\n'''
 
 
 
+def overWriteIteratorCheck():
+    if kfOWIterations < 1:
+        print '''
+WARNING: kfOWIterations VALUE IS SET TO LESS
+THAN 1 WHICH MEANS KEY IS NOT BEING OVERWRITTEN
+IMMEDIATELY AFTER USE!
+
+THIS MIGHT BE VERY DANGEROUS FOR PHYSICAL SECURITY
+AS ANY ATTACKER WHO GETS ACCESS TO KEYS, CAN LATER
+DECRYPT INTERCEPTED CIPHERTEXTS. INCREASE THE VALUE
+TO 1 OR PREFERABLY HIGHER TO FIX THIS PROBLEM.
+
+IF YOU ARE SURE ABOUT NOT OVERWRITING, MANUALLY
+COMMENT OUT THE overWriteIteratorCheck FUNCTION CALL
+FROM PRE-LOOP OF Tx.py TO DISABLE THIS WARNING.
+
+EXITING Tx.py'''
+        exit()
+
+
+
 ######################################################################
 #                         MSG PROCESSING                             #
 ######################################################################
@@ -1407,6 +1086,7 @@ longMsg          = {}
 # Run initial checks.
 clear_msg_file()
 search_keyfiles()
+overWriteIteratorCheck()
 
 # Load initial data.
 keyFileNames     = get_keyfile_list()
@@ -1528,16 +1208,12 @@ try:
 
 
                     # Decrypt command if MAC verification succeeds.
-                    try:
-                        paddedCommand = decrypt('rx.local', ciphertext, keyID)
-                        command       = depadding(paddedCommand)
+                    MACisValid, command = auth_and_decrypt('rx.local', ciphertext, keyID)
 
-                    except ValueError:
-                            packet_anomality('MAC', 'command')
-                            continue
-                    except TypeError:
-                            packet_anomality('MAC', 'command')
-                            continue
+
+                    if not MACisValid:
+                        packet_anomality('MAC', 'command')
+                        continue
 
 
                     ##########################
@@ -1600,6 +1276,33 @@ try:
                         continue
 
 
+                    ############################
+                    #     Load new keyfile     #
+                    ############################
+                    if command.startswith('TFCKF '):
+                        notUsed, cXMPP, newKf = command.split(' ')
+
+                        # Shred entropy file
+                        if cXMPP.startswith('me.'):
+                            print '\nRxM: Shredding current keyfile that decrypts\nmessages your TxM sends to ' + cXMPP[3:] + '\n'
+                        else:
+                            cXMPP = 'rx.' + cXMPP
+                            print '\nRxM: Shredding current keyfile that decrypts\nmessages sent to you by ' + cXMPP[3:] + '\n'
+                        subprocess.Popen('shred -n ' + str(shredIterations) + ' -z -u ' + cXMPP + '.e', shell=True).wait()
+
+                        # Move new entropy file in place
+                        print 'RxM: Replacing the keyfile ' + cXMPP + ' with file \'' + newKf + '\''
+                        subprocess.Popen('mv ' + newKf + ' ' + cXMPP + '.e', shell=True).wait()
+
+                        # Reset keyID
+                        print 'RxM: Resetting key number to 1 for ' + cXMPP[3:]
+                        write_keyID(cXMPP, 1)
+
+                        # Process encryption keys and keyID
+                        print 'RxM: Keyfile succesfully changed\n'
+                        continue
+
+
                 ####################################
                 #         NORMAL MESSAGE           #
                 ####################################
@@ -1639,17 +1342,12 @@ try:
 
 
                     # Decrypt message if MAC verification succeeds.
-                    try:
-                        decryptedPacket = decrypt(xmpp, ciphertext, keyID)
-                        decryptedPacket = depadding(decryptedPacket)
+                    MACisValid, decryptedPacket = auth_and_decrypt(xmpp, ciphertext, keyID)
 
-                    except ValueError:
-                            packet_anomality('MAC', 'message')
-                            continue
 
-                    except TypeError:
-                            packet_anomality('MAC', 'message')
-                            continue
+                    if not MACisValid:
+                        packet_anomality('MAC', 'message')
+                        continue
 
 
                     #########################################################
