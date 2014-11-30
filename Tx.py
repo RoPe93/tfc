@@ -44,7 +44,7 @@ PkgSize            = 140
 keyThreshold       = 5
 maxSleepTime       = 13
 shredIterations    = 3
-keyOWIterations    = 0
+keyOWIterations    = 3
 lMsgSleep          = 0.2
 
 debugging          = False
