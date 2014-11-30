@@ -2095,7 +2095,7 @@ while True:
                           'on TxM and me.' + contactXmpp + '.e on RxM!\n'
 
                     if raw_input('\nAre you sure? Type uppercase \'YES\' to continue: ' ) == 'YES':
-                        command = 'tfckf me.' + contactXmpp + ' me.' + keyFileName
+                        command = 'TFCKF me.' + contactXmpp + ' me.' + keyFileName
                         print '\nTxM > RxM: Shred keyfile me.' + contactXmpp + '.e and start using \'me.' + keyFileName + '\''
 
                     else:
@@ -2111,7 +2111,7 @@ while True:
                           'destroy current keyfile rx.' + contactXmpp + '.e on RxM!'
 
                     if raw_input('\nAre you sure? Type uppercase \'YES\' to continue: ' ) == 'YES':
-                        command = 'tfckf ' + contactXmpp + ' rx.' + keyFileName
+                        command = 'TFCKF ' + contactXmpp + ' rx.' + keyFileName
                         print '\nTxM > RxM: Shred keyfile rx.' + contactXmpp + '.e and start using rx.' + keyFileName
 
                     else:
@@ -2129,7 +2129,7 @@ while True:
         #    COMMAND PACKET    #
         ########################
         cmd_msg_process(command)
-        if command.startswith('tfckf me'):
+        if command.startswith('TFCKF me.'):
             new_keyfile()
         continue
 
