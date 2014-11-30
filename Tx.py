@@ -799,7 +799,7 @@ def get_keyID(xmpp):
             for row in csvData:
                 contacts.append(row)
 
-        for i in range( len(contacts) ):
+        for i in range(len(contacts)):
             if contacts[i][1] == xmpp:
                 keyID = int(contacts[i][2])
 
@@ -1340,12 +1340,11 @@ def print_list_of_contacts():
         print header
         print ttyW * '-'
 
-    for xmpp in keyFileNames:
-        ID      = keyFileNames.index(xmpp)
-        nick    = get_nick(xmpp[:-2])
-        xmpp    = xmpp[:-2][3:]
-        keysRem = str(count_remaining_keys(xmpp[:-2]))
-
+    for keyFile in keyFileNames:
+        ID      = keyFileNames.index(keyFile)
+        nick    = get_nick(keyFile[:-2])
+        keysRem = str(count_remaining_keys(keyFile[:-2]))
+        xmpp    = keyFile[:-2][3:]
         if nick != 'tx.local':
 
             if ttyW < headerLen:
