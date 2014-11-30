@@ -2124,11 +2124,6 @@ while True:
                 continue
 
 
-        if userInput.startswith('/') and not userInput.startswith('/file ') and not userInput.startswith('/store '):
-            os.system('clear')
-            print '\nError: Unknown command \'' + userInput + '\'\n'
-            continue
-
 
         ########################
         #    COMMAND PACKET    #
@@ -2194,7 +2189,7 @@ while True:
             time.sleep(0.4)
             continue
 
-    if userInput.startswith('/') and not userInput.startswith('/file ') and not userInput.startswith('/store '):
+    if userInput.startswith('/') and not userInput.startswith('/file '):
         os.system('clear')
         print '\nError: Unknown command \'' + userInput + '\'\n'
         continue
