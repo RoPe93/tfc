@@ -1624,7 +1624,7 @@ def get_group_members(groupName, output=True):
 
         if not groupList and output:
             os.system('clear')
-            print '\nGroup is empty. Add contacts to group with command\n   /group add <group name> <xmpp>\n'
+            print 'Group is empty. Add contacts to group with command\n   /group add <group name> <xmpp>\n'
 
         return groupList
 
