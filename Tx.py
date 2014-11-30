@@ -51,7 +51,7 @@ debugging          = False
 emergencyExit      = False
 checkKeyHashes     = False
 randomSleep        = False
-localTesting       = True
+localTesting       = False
 
 if not localTesting:
     port        = serial.Serial('/dev/ttyAMA0', baudrate=9600, timeout=0.1)
@@ -2124,7 +2124,7 @@ while True:
                 continue
 
 
-        if userInput.startswith('/') and not userInput.startswith('/file '):
+        if userInput.startswith('/') and not userInput.startswith('/file ') and not userInput.startswith('/store '):
             os.system('clear')
             print '\nError: Unknown command \'' + userInput + '\'\n'
             continue
@@ -2194,7 +2194,7 @@ while True:
             time.sleep(0.4)
             continue
 
-    if userInput.startswith('/') and not userInput.startswith('/file '):
+    if userInput.startswith('/') and not userInput.startswith('/file ') and not userInput.startswith('/store '):
         os.system('clear')
         print '\nError: Unknown command \'' + userInput + '\'\n'
         continue

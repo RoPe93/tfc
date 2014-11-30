@@ -49,7 +49,7 @@ displayTimeFmt     = '%Y-%m-%d / %H:%M:%S'
 verbose            = False
 debugging          = False
 emergencyExit      = False
-localTesting       = True
+localTesting       = False
 
 
 ######################################################################

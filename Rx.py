@@ -39,7 +39,7 @@ for more details. For a copy of the GNU General Public License, see
 #                           CONFIGURATION                            #
 ######################################################################
 
-fileSavingAllowed  = True
+fileSavingAllowed  = False
 debugging          = False
 logMessages        = False
 injectionTesting   = False
@@ -56,7 +56,7 @@ shredIterations    = 3
 keyThreshold       = 5
 PkgSize            = 140
 
-localTesting       = True
+localTesting       = False
 
 if not localTesting:
     port        = serial.Serial('/dev/ttyAMA0', baudrate=9600, timeout=0.1)
