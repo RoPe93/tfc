@@ -53,6 +53,7 @@ checkKeyHashes     = False
 randomSleep        = False
 localTesting       = False
 
+
 if not localTesting:
     port        = serial.Serial('/dev/ttyAMA0', baudrate=9600, timeout=0.1)
 
