@@ -11,7 +11,7 @@ import zlib
 from multiprocessing  import Process, Queue
 from PyQt4.QtGui      import QApplication
 from dbus.mainloop.qt import DBusQtMainLoop
-from time             import gmtime, strftime, sleep
+from time             import sleep
 
 
 
@@ -20,7 +20,7 @@ from time             import gmtime, strftime, sleep
 ######################################################################
 
 # TFC (OTP Version) || NH.py
-version = '0.4.12 beta'
+version = 'CEV 0.4.13 beta'
 
 """
 This software is part of the TFC application, which is free software:
@@ -211,7 +211,7 @@ def networkTransmitter():
             if rcdPkg != '':
 
                 # Emergency exit.
-                if rcdPkg.startswith('exitTFC'):
+                if rcdPkg.startswith('EXITTFC'):
 
                     serialQueue.put(rcdPkg + '\n')
                     os.system('clear')
@@ -225,7 +225,7 @@ def networkTransmitter():
                     subprocess.Popen('killall python', shell=True).wait()     # Note that this kills all python programs, not only NH.py
 
                 # Clear screens.
-                if rcdPkg.startswith('clearScreen'):
+                if rcdPkg.startswith('CLEARSCREEN'):
 
                     xmpp = rcdPkg.split(' ')[1]
                     xmpp = xmpp[3:].strip('\n')
@@ -313,13 +313,12 @@ serialQueue = Queue()
 os.system('clear')
 print 'TFC ' + version + ' || NH.py \n'
 
-ss  = Process(target = serialPortSender)
-tn  = Process(target = networkTransmitter)
-nr  = Process(target = networkReceiver)
+ss = Process(target=serialPortSender)
+tn = Process(target=networkTransmitter)
+nr = Process(target=networkReceiver)
 
 ss.start()
 tn.start()
 nr.start()
-
 
 

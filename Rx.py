@@ -4,6 +4,7 @@
 import binascii
 import csv
 import datetime
+import math
 import os
 import serial
 import subprocess
@@ -17,7 +18,7 @@ from time import sleep
 ######################################################################
 
 # TFC (OTP Version) || Rx.py
-version = '0.4.12 beta'
+version = '0.4.13 beta'
 
 """
 This software is part of the TFC application, which is free software:
@@ -35,17 +36,16 @@ for more details. For a copy of the GNU General Public License, see
 
 
 ######################################################################
-#                            CONFIGURATION                           #
+#                           CONFIGURATION                            #
 ######################################################################
 
-fileSavingAllowed  = False
+fileSavingAllowed  = True
 debugging          = False
 logMessages        = False
 injectionTesting   = False
 
 logChangeAllowed   = True
 logTamperingEvent  = True
-logReplayedEvent   = True
 showLongMsgWarning = True
 displayTime        = True
 
@@ -56,11 +56,408 @@ shredIterations    = 3
 keyThreshold       = 5
 PkgSize            = 140
 
-localTesting       = False
-
+localTesting       = True
 
 if not localTesting:
     port        = serial.Serial('/dev/ttyAMA0', baudrate=9600, timeout=0.1)
+
+
+
+######################################################################
+#                          KECCAK STREAM CIPHER                      #
+######################################################################
+
+"""
+Algorithm Name: Keccak
+
+Authors: Guido Bertoni, Joan Daemen, Michael Peeters and Gilles
+Van Assche Implementation by Renaud Bauvin, STMicroelectronics
+
+This code, originally by Renaud Bauvin, is hereby put in the public
+domain. It is given as is, without any guarantee.
+
+For more information, feedback or questions, please refer to our
+website: http://keccak.noekeon.org/
+"""
+
+
+
+class KeccakError(Exception):
+    """Class of error used in the Keccak implementation
+
+    Use: raise KeccakError.KeccakError("Text to be displayed")"""
+
+    def __init__(self, value):
+        self.value = value
+    def __str__(self):
+        return repr(self.value)
+
+
+
+class Keccak:
+    """
+    Class implementing the Keccak sponge function
+    """
+    def __init__(self, b=1600):
+        """Constructor:
+
+        b: parameter b, must be 25, 50, 100, 200, 400, 800 or 1600 (default value)"""
+        self.setB(b)
+
+
+
+    def setB(self,b):
+        """Set the value of the parameter b (and thus w,l and nr)
+
+        b: parameter b, must be choosen among [25, 50, 100, 200, 400, 800, 1600]
+        """
+
+        if b not in [25, 50, 100, 200, 400, 800, 1600]:
+            raise KeccakError.KeccakError('b value not supported - use 25, 50, 100, 200, 400, 800 or 1600')
+
+        # Update all the parameters based on the used value of b
+        self.b=b
+        self.w=b//25
+        self.l=int(math.log(self.w,2))
+        self.nr=12+2*self.l
+
+    # Constants
+
+    ## Round constants
+    RC=[0x0000000000000001,
+        0x0000000000008082,
+        0x800000000000808A,
+        0x8000000080008000,
+        0x000000000000808B,
+        0x0000000080000001,
+        0x8000000080008081,
+        0x8000000000008009,
+        0x000000000000008A,
+        0x0000000000000088,
+        0x0000000080008009,
+        0x000000008000000A,
+        0x000000008000808B,
+        0x800000000000008B,
+        0x8000000000008089,
+        0x8000000000008003,
+        0x8000000000008002,
+        0x8000000000000080,
+        0x000000000000800A,
+        0x800000008000000A,
+        0x8000000080008081,
+        0x8000000000008080,
+        0x0000000080000001,
+        0x8000000080008008]
+
+    ## Rotation offsets
+    r=[[0,    36,     3,    41,    18]    ,
+       [1,    44,    10,    45,     2]    ,
+       [62,    6,    43,    15,    61]    ,
+       [28,   55,    25,    21,    56]    ,
+       [27,   20,    39,     8,    14]    ]
+
+
+    ## Generic utility functions
+
+    def rot(self,x,n):
+        """Bitwise rotation (to the left) of n bits considering the \
+        string of bits is w bits long"""
+
+        n = n%self.w
+        return ((x>>(self.w-n))+(x<<n))%(1<<self.w)
+
+
+
+    def enc(self,x,n):
+        """Encode the integer x in n bits (n must be a multiple of 8)"""
+
+        if x>=2**n:
+            raise KeccakError.KeccakError('x is too big to be coded in n bits')
+        if n%8!=0:
+            raise KeccakError.KeccakError('n must be a multiple of 8')
+        return ("%%0%dX" % (2*n//8)) % (x)
+
+
+
+    def fromHexStringToLane(self, string):
+        """Convert a string of bytes written in hexadecimal to a lane value"""
+
+        #Check that the string has an even number of characters i.e. whole number of bytes
+        if len(string)%2!=0:
+            raise KeccakError.KeccakError("The provided string does not end with a full byte")
+
+        #Perform the modification
+        temp=''
+        nrBytes=len(string)//2
+        for i in range(nrBytes):
+            offset=(nrBytes-i-1)*2
+            temp+=string[offset:offset+2]
+        return int(temp, 16)
+
+
+
+    def fromLaneToHexString(self, lane):
+        """Convert a lane value to a string of bytes written in hexadecimal"""
+
+        laneHexBE = (("%%0%dX" % (self.w//4)) % lane)
+        #Perform the modification
+        temp=''
+        nrBytes=len(laneHexBE)//2
+        for i in range(nrBytes):
+            offset=(nrBytes-i-1)*2
+            temp+=laneHexBE[offset:offset+2]
+        return temp.upper()
+
+
+
+    def printState(self, state, info):
+        """Print on screen the state of the sponge function preceded by \
+        string info
+
+        state: state of the sponge function
+        info: a string of characters used as identifier"""
+
+        print("Current value of state: %s" % (info))
+        for y in range(5):
+            line=[]
+            for x in range(5):
+                 line.append(hex(state[x][y]))
+            print('\t%s' % line)
+
+
+
+    ### Conversion functions String <-> Table (and vice-versa)
+    def convertStrToTable(self,string):
+        """Convert a string of bytes to its 5x5 matrix representation
+
+        string: string of bytes of hex-coded bytes (e.g. '9A2C...')"""
+
+        #Check that input paramaters
+        if self.w%8!= 0:
+            raise KeccakError("w is not a multiple of 8")
+        if len(string)!=2*(self.b)//8:
+            raise KeccakError.KeccakError("string can't be divided in 25 blocks of w bits\
+            i.e. string must have exactly b bits")
+
+        #Convert
+        output=[[0,0,0,0,0],
+                [0,0,0,0,0],
+                [0,0,0,0,0],
+                [0,0,0,0,0],
+                [0,0,0,0,0]]
+        for x in range(5):
+            for y in range(5):
+                offset=2*((5*y+x)*self.w)//8
+                output[x][y]=self.fromHexStringToLane(string[offset:offset+(2*self.w//8)])
+        return output
+
+
+
+    def convertTableToStr(self,table):
+        """Convert a 5x5 matrix representation to its string representation"""
+
+        #Check input format
+        if self.w%8!= 0:
+            raise KeccakError.KeccakError("w is not a multiple of 8")
+        if (len(table)!=5) or (False in [len(row)==5 for row in table]):
+            raise KeccakError.KeccakError("table must be 5x5")
+
+        #Convert
+        output=['']*25
+        for x in range(5):
+            for y in range(5):
+                output[5*y+x]=self.fromLaneToHexString(table[x][y])
+        output =''.join(output).upper()
+        return output
+
+
+
+    ### Padding function
+    def pad(self,M, n):
+        """Pad M with reverse-padding to reach a length multiple of n
+
+        M: message pair (length in bits, string of hex characters ('9AFC...')
+        n: length in bits (must be a multiple of 8)
+        Example: pad([60, 'BA594E0FB9EBBD30'],8) returns 'BA594E0FB9EBBD13'
+        """
+
+        [my_string_length, my_string]=M
+
+        # Check the parameter n
+        if n%8!=0:
+            raise KeccakError.KeccakError("n must be a multiple of 8")
+
+        # Check the length of the provided string
+        if len(my_string)%2!=0:
+            #Pad with one '0' to reach correct length (don't know test
+            #vectors coding)
+            my_string=my_string+'0'
+        if my_string_length>(len(my_string)//2*8):
+            raise KeccakError.KeccakError("the string is too short to contain the number of bits announced")
+
+        #Add the bit allowing reversible padding
+        nr_bytes_filled=my_string_length//8
+        if nr_bytes_filled==len(my_string)//2:
+            #bits fill the whole package: add a byte '01'
+            my_string=my_string+"01"
+        else:
+            #there is no addition of a byte... modify the last one
+            nbr_bits_filled=my_string_length%8
+
+            #Add the leading bit
+            my_byte=int(my_string[nr_bytes_filled*2:nr_bytes_filled*2+2],16)
+            my_byte=(my_byte>>(8-nbr_bits_filled))
+            my_byte=my_byte+2**(nbr_bits_filled)
+            my_byte="%02X" % my_byte
+            my_string=my_string[0:nr_bytes_filled*2]+my_byte
+
+        #Complete my_string to reach a multiple of n bytes
+        while((8*len(my_string)//2)%n!=0):
+            my_string=my_string+'00'
+        return my_string
+
+
+
+    def Round(self,A,RCfixed):
+        """Perform one round of computation as defined in the Keccak-f permutation
+
+        A: current state (5x5 matrix)
+        RCfixed: value of round constant to use (integer)
+        """
+
+        #Initialisation of temporary variables
+        B=[[0,0,0,0,0],
+           [0,0,0,0,0],
+           [0,0,0,0,0],
+           [0,0,0,0,0],
+           [0,0,0,0,0]]
+        C= [0,0,0,0,0]
+        D= [0,0,0,0,0]
+
+        #Theta step
+        for x in range(5):
+            C[x] = A[x][0]^A[x][1]^A[x][2]^A[x][3]^A[x][4]
+
+        for x in range(5):
+            D[x] = C[(x-1)%5]^self.rot(C[(x+1)%5],1)
+
+        for x in range(5):
+            for y in range(5):
+                A[x][y] = A[x][y]^D[x]
+
+        #Rho and Pi steps
+        for x in range(5):
+          for y in range(5):
+                B[y][(2*x+3*y)%5] = self.rot(A[x][y], self.r[x][y])
+
+        #Chi step
+        for x in range(5):
+            for y in range(5):
+                A[x][y] = B[x][y]^((~B[(x+1)%5][y]) & B[(x+2)%5][y])
+
+        #Iota step
+        A[0][0] = A[0][0]^RCfixed
+
+        return A
+
+
+
+    def KeccakF(self,A, verbose=False):
+        """Perform Keccak-f function on the state A
+
+        A: 5x5 matrix containing the state
+        verbose: a boolean flag activating the printing of intermediate computations
+        """
+
+        if verbose:
+            self.printState(A,"Before first round")
+
+        for i in range(self.nr):
+            #NB: result is truncated to lane size
+            A = self.Round(A,self.RC[i]%(1<<self.w))
+
+            if verbose:
+                  self.printState(A,"Satus end of round #%d/%d" % (i+1,self.nr))
+
+        return A
+
+
+
+    def Keccak(self,M,r=1024,c=576,d=0,n=1024,verbose=False):
+        """Compute the Keccak[r,c,d] sponge function on message M
+
+        M: message pair (length in bits, string of hex characters ('9AFC...')
+        r: bitrate in bits (defautl: 1024)
+        c: capacity in bits (default: 576)
+        d: diversifier in bits (default: 0 bits)
+        n: length of output in bits (default: 1024),
+        verbose: print the details of computations(default:False)
+        """
+
+        #Check the inputs
+        if (r<0) or (r%8!=0):
+            raise KeccakError.KeccakError('r must be a multiple of 8')
+        if (n%8!=0):
+            raise KeccakError.KeccakError('outputLength must be a multiple of 8')
+        if (d<0) or (d>255):
+            raise KeccakError.KeccakError('d must be in the range [0, 255]')
+        self.setB(r+c)
+
+        if verbose:
+            print("Create a Keccak function with (r=%d, c=%d, d=%d (i.e. w=%d))" % (r,c,d,(r+c)//25))
+
+        #Compute lane length (in bits)
+        w=(r+c)//25
+
+        # Initialisation of state
+        S=[[0,0,0,0,0],
+           [0,0,0,0,0],
+           [0,0,0,0,0],
+           [0,0,0,0,0],
+           [0,0,0,0,0]]
+
+        #Padding of messages
+        P=self.pad(M,8) + self.enc(d,8) + self.enc(r//8,8)
+        P=self.pad([8*len(P)//2,P],r)
+
+        if verbose:
+            print("String ready to be absorbed: %s (will be completed by %d x '00')" % (P, c//8))
+
+        #Absorbing phase
+        for i in range((len(P)*8//2)//r):
+            Pi=self.convertStrToTable(P[i*(2*r//8):(i+1)*(2*r//8)]+'00'*(c//8))
+
+            for y in range(5):
+              for x in range(5):
+                  S[x][y] = S[x][y]^Pi[x][y]
+            S = self.KeccakF(S, verbose)
+
+        if verbose:
+            print("Value after absorption : %s" % (self.convertTableToStr(S)))
+
+        #Squeezing phase
+        Z = ''
+        outputLength = n
+        while outputLength>0:
+            string=self.convertTableToStr(S)
+            Z = Z + string[:r*2//8]
+            outputLength -= r
+            if outputLength>0:
+                S = self.KeccakF(S, verbose)
+
+            # NB: done by block of length r, could have to be cut if outputLength
+            #     is not a multiple of r
+
+        if verbose:
+            print("Value after squeezing : %s" % (self.convertTableToStr(S)))
+
+        return Z[:2*n//8]
+
+
+
+def keccak_256(hashInput):
+    hexMsg = binascii.hexlify(hashInput)
+    return Keccak().Keccak(((8 * len(hashInput)), hexMsg), 1088, 512, 0, 256, 0)
 
 
 
@@ -92,7 +489,7 @@ def equals(item1, item2):
 def one_time_mac(key1, key2, ciphertext):
 
     # One-time MAC calculation is done modulo M521, the 13th, 521-bit Mersenne prime.
-    q   = 6864797660130609714981900799081393217269435300143305409394463459185543183397656052122559640661454554977296311391480858037121987999716643812574028291115057151
+    q = 6864797660130609714981900799081393217269435300143305409394463459185543183397656052122559640661454554977296311391480858037121987999716643812574028291115057151
 
     if debugging:
         print 'M(one_time_mac):'
@@ -494,6 +891,7 @@ def search_keyfiles():
                       'Make sure keyfiles are in same directory as Rx.py\n')
 
 
+
 def disp_opsec_warning():
     print '''
 REMEMBER! DO NOT MOVE RECEIVED FILES FROM RxM TO LESS SECURE
@@ -535,7 +933,7 @@ EXITING Tx.py'''
 
 
 ######################################################################
-#                           MSG PROCESSING                           #
+#                         MSG PROCESSING                             #
 ######################################################################
 
 def base64_decode(content):
@@ -603,6 +1001,37 @@ def write_log_entry(nick, xmpp, message):
         print '\nM(write_log_entry): Added log entry \n\'' + message + '\' for contact ' + xmpp + '\n'
 
 
+
+def packet_anomality(errorType='', packetType=''):
+
+    if errorType == 'MAC':
+        print 'WARNING! MAC of received ' + packetType + ' failed!\n' \
+              'This might indicate an attempt to tamper ' + packetType + 's!\n'
+        errorMsg = 'AUTOMATIC LOG ENTRY: MAC of ' + packetType + ' failed..'
+
+    if errorType == 'replay:':
+        print 'WARNING! Received a ' + packetType + ', the key-id of which is not valid!\n' \
+              'This might indicate tampering or keyfile mismatch.'
+
+        errorMsg = 'AUTOMATIC LOG ENTRY: Replayed ' + packetType +' detected.'
+
+    if errorType == 'crc':
+        print 'WARNING! Received a ' + packetType + ', the CRC of which failed!\n' \
+              'This might indicate tampering or problem with your RxM Datadiode.'
+        errorMsg = 'AUTOMATIC LOG ENTRY: CRC error in ' + packetType + '.'
+
+    if errorType == 'hash':
+        print 'WARNING! The hash of received long ' + packetType + ' failed!\n' \
+              'The file was rejected.'
+        errorMsg = 'AUTOMATIC LOG ENTRY: hash error in long ' + packetType + '.'
+
+    if logTamperingEvent:
+        with open('syslog.tfc', 'a+') as file:
+            file.write( datetime.datetime.now().strftime(logTimeStampFmt) + errorMsg + '\n')
+        print '\nThis event has been logged to syslog.tfc.\n'
+
+
+
 def exit_with_msg(message, error=True):
     os.system('clear')
     if error:
@@ -610,6 +1039,31 @@ def exit_with_msg(message, error=True):
     else:
         print '\n' + message + '\n'
     exit()
+
+
+
+def store_file(preName, fileName):
+    if not os.path.isfile('f.' + preName + '.tfc'):
+        print '\nError: Could not find tmp file.\n'
+        return None
+
+    if os.path.isfile(fileName):
+        os.system('clear')
+        print '\nError: file already exists. Please use different file name.\n'
+        return None
+
+    if fileName != 'r':
+        subprocess.Popen('base64 -d f.' + preName + '.tfc > ' + fileName, shell=True).wait()
+        print '\nStored tmp file \'f.' + preName + '.tfc\' as \'' + fileName + '\'.'
+        subprocess.Popen('shred -n ' + str(kfOWIterations) + ' -z -u f.' + preName + '.tfc', shell=True).wait()
+        print 'Temporary file \'f.' + preName + '.tfc\' has been overwritten.\n'
+        disp_opsec_warning()
+
+    else:
+        subprocess.Popen('shred -n ' + str(kfOWIterations) + ' -z -u f.' + preName + '.tfc', shell=True).wait()
+        print 'Temporary file \'f.' + preName + '.tfc\' was rejected and overwritten.\n'
+
+    return None
 
 
 
@@ -649,6 +1103,28 @@ else:
 print header + '\n'
 
 
+# Set initial status of file and message reception.
+longMsgOnWay = {}
+msgReceived  = {}
+message      = {}
+for key in keyFileNames:
+    xmpp               = key[:-2]
+    longMsgOnWay[xmpp] = False
+    msgReceived[xmpp]  = False
+    message[xmpp]      = ''
+
+
+if fileSavingAllowed:
+    fileOnWay    = {}
+    fileReceived = {}
+    fileA        = {}
+    for key in keyFileNames:
+        xmpp               = key[:-2]
+        fileOnWay[xmpp]    = False
+        fileReceived[xmpp] = False
+        fileA[xmpp]        = ''
+
+
 
 ######################################################################
 #                               LOOP                                 #
@@ -658,7 +1134,6 @@ try:
     while True:
         sleep(0.01)
         receivedPacket = ''
-        fileReceived = False
 
         if localTesting:
             try:
@@ -678,14 +1153,13 @@ try:
             try:
 
                 # Process unencrypted commands.
-                if receivedPacket.startswith('exitTFC'):
+                if receivedPacket.startswith('EXITTFC'):
                     exit_with_msg('Exiting TFC.', False)
 
 
-                if receivedPacket.startswith('clearScreen'):
+                if receivedPacket.startswith('CLEARSCREEN'):
                     os.system('clear')
                     continue
-
 
 
                 ####################################
@@ -695,139 +1169,132 @@ try:
                     cmdMACln, crcPkg = receivedPacket[6:].split('~')
                     crcPkg           = crcPkg.strip('\n')
 
+
                     # Check that CRC32 Matches.
-                    if crc32(cmdMACln) == crcPkg:
-                        payload, keyID = cmdMACln.split('|')
-                        ciphertext     = base64_decode(payload)
+                    if crc32(cmdMACln) != crcPkg:
+                        packet_anomality('crc', 'command')
+                        continue
+
+                    payload, keyID = cmdMACln.split('|')
+                    ciphertext     = base64_decode(payload)
 
 
+                    try:
                         # Check that keyID is fresh.
                         if int(keyID) < get_keyID('rx.local'):
-                            print '\nWARNING! Expired cmd key detected!\n'\
-                                  'This might indicate a replay attack!\n'
-
-                            if logReplayedEvent:
-                                write_log_entry('', '', 'AUTOMATIC LOG ENTRY: Replayed/malformed command received!')
+                            packet_anomality('replay', 'command')
                             continue
 
+                    except KeyError:
+                        packet_anomality('tamper', 'command')
+                        continue
 
-                        # Check that local keyfile for decryption exists.
-                        if not os.path.isfile('rx.local.e'):
-                            print '\nError: rx.local.e was not found.\n'\
-                                  'Command could not be decrypted.\n'
-                            continue
-
-
-                        try:
-                            # Decrypt command if MAC verification succeeds.
-                            MACisValid, plaintext = auth_and_decrypt('rx.local', ciphertext, keyID)
-
-                            if MACisValid:
-                                command = plaintext
-
-                                ##########################
-                                #     Enable logging     #
-                                ##########################
-                                if command == 'logson':
-                                    if logChangeAllowed:
-                                        if logMessages:
-                                            print 'Logging is already enabled.'
-                                        else:
-                                            logMessages = True
-                                            print 'Logging has been enabled.'
-                                        continue
-
-                                    else:
-                                        print '\nLogging settings can not be altered: Boolean\n'\
-                                              'value \'logChangeAllowed\' is set to False.\n'
-                                        continue
+                    except TypeError:
+                        packet_anomality('tamper', 'command')
+                        continue
 
 
-                                ###########################
-                                #     Disable logging     #
-                                ###########################
-                                if command == 'logsoff':
-                                    if logChangeAllowed:
-                                        if not logMessages:
-                                            print 'Logging is already disabled.'
-                                        else:
-                                            logMessages = False
-                                            print 'Logging has been disabled.'
-                                        continue
-
-                                    else:
-                                        print '\nLogging settings can not be altered: Boolean\n'\
-                                              'value \'logChangeAllowed\' is set to False.\n'
-                                        continue
+                    # Check that local keyfile for decryption exists.
+                    if not os.path.isfile('rx.local.e'):
+                        print '\nError: rx.local.e was not found.\n'\
+                              'Command could not be decrypted.\n'
+                        continue
 
 
-                                #######################
-                                #     Change nick     #
-                                #######################
-                                if 'nick=' in command:
-
-                                    xmpp, cmdPar   = command.split('/')
-                                    cmd, parameter = cmdPar.split('=')
-
-                                    # Write and load nick.
-                                    write_nick(xmpp, parameter)
-                                    rxNick = get_nick(xmpp)
-
-                                    print '\nChanged ' + xmpp[3:] + ' nick to \'' + rxNick + '\'\n'
-                                    continue
+                    # Decrypt command if MAC verification succeeds.
+                    MACisValid, command = auth_and_decrypt('rx.local', ciphertext, keyID)
 
 
-                                ############################
-                                #     Load new keyfile     #
-                                ############################
-                                if command.startswith('tfckf '):
-                                    notUsed, cXMPP, newKf = command.split(' ')
-
-                                    # Shred entropy file
-                                    if cXMPP.startswith('me.'):
-                                        print '\nRxM: Shredding current keyfile that decrypts\nmessages your TxM sends to ' + cXMPP[3:] + '\n'
-                                    else:
-                                        cXMPP = 'rx.' + cXMPP
-                                        print '\nRxM: Shredding current keyfile that decrypts\nmessages sent to you by ' + cXMPP[3:] + '\n'
-                                    subprocess.Popen('shred -n ' + str(shredIterations) + ' -z -u ' + cXMPP + '.e', shell=True).wait()
-
-                                    # Move new entropy file in place
-                                    print 'RxM: Replacing the keyfile ' + cXMPP + ' with file \'' + newKf + '\''
-                                    subprocess.Popen('mv ' + newKf + ' ' + cXMPP + '.e', shell=True).wait()
-
-                                    # Reset keyID
-                                    print 'RxM: Resetting key number to 1 for ' + cXMPP[3:]
-                                    write_keyID(cXMPP, 1)
-
-                                    # Process encryption keys and keyID
-                                    print 'RxM: Keyfile succesfully changed\n'
-                                    continue
+                    if not MACisValid:
+                        packet_anomality('MAC', 'command')
+                        continue
 
 
+                    ##########################
+                    #     Enable logging     #
+                    ##########################
+                    if command == 'LOGSON':
+                        if logChangeAllowed:
+                            if logMessages:
+                                print 'Logging is already enabled.'
                             else:
-                                print '\nWARNING! Message authentication failed!\n' \
-                                      'It is possible someone is trying to tamper messages!\n'
-                                if logTamperingEvent:
-                                    write_log_entry('', xmpp, 'AUTOMATIC LOG ENTRY: Tampered/malformed message received!')
-                                continue
-
-
-                        except KeyError:
-                            print 'WARNING! Received a command, the key-id of which is not valid!\n' \
-                                  'This might indicate tampering or keyfile content mismatch.'
+                                logMessages = True
+                                print 'Logging has been enabled.'
                             continue
-                        except TypeError:
-                            print 'WARNING! Received a command, the key-id of which is not valid!\n' \
-                                  'This might indicate tampering or keyfile content mismatch.'
+
+                        else:
+                            print '\nLogging settings can not be altered: Boolean\n'\
+                                  'value \'logChangeAllowed\' is set to False.\n'
                             continue
 
 
-                    else:
-                        os.system('clear')
-                        print '\nCRC checksum error: Command received by RxM\n' \
-                                 'was malformed. If this error is persistent\n,'\
-                                 'check the batteries of your RxM data diode.\n'
+                    ###########################
+                    #     Disable logging     #
+                    ###########################
+                    if command == 'LOGSOFF':
+                        if logChangeAllowed:
+                            if not logMessages:
+                                print 'Logging is already disabled.'
+                            else:
+                                logMessages = False
+                                print 'Logging has been disabled.'
+                            continue
 
+                        else:
+                            print '\nLogging settings can not be altered: Boolean\n'\
+                                  'value \'logChangeAllowed\' is set to False.\n'
+                            continue
+
+
+                    #################################
+                    #     Decode and store file     #
+                    #################################
+                    if command.startswith('STOREFILE '):
+                        notUsed, tmpName, outoutName = command.split(' ')
+                        store_file(tmpName, outoutName)
+                        continue
+
+
+                    #######################
+                    #     Change nick     #
+                    #######################
+                    if command.startswith('NICK '):
+
+                        notUsed, xmpp, nick = command.split(' ')
+
+                        # Write and load nick.
+                        write_nick(xmpp, nick)
+                        storedNick = get_nick(xmpp)
+
+                        print '\nChanged ' + xmpp[3:] + ' nick to \'' + storedNick + '\'\n'
+                        continue
+
+
+                    ############################
+                    #     Load new keyfile     #
+                    ############################
+                    if command.startswith('TFCKF '):
+                        notUsed, cXMPP, newKf = command.split(' ')
+
+                        # Shred entropy file
+                        if cXMPP.startswith('me.'):
+                            print '\nRxM: Shredding current keyfile that decrypts\nmessages your TxM sends to ' + cXMPP[3:] + '\n'
+                        else:
+                            cXMPP = 'rx.' + cXMPP
+                            print '\nRxM: Shredding current keyfile that decrypts\nmessages sent to you by ' + cXMPP[3:] + '\n'
+                        subprocess.Popen('shred -n ' + str(shredIterations) + ' -z -u ' + cXMPP + '.e', shell=True).wait()
+
+                        # Move new entropy file in place
+                        print 'RxM: Replacing the keyfile ' + cXMPP + ' with file \'' + newKf + '\''
+                        subprocess.Popen('mv ' + newKf + ' ' + cXMPP + '.e', shell=True).wait()
+
+                        # Reset keyID
+                        print 'RxM: Resetting key number to 1 for ' + cXMPP[3:]
+                        write_keyID(cXMPP, 1)
+
+                        # Process encryption keys and keyID
+                        print 'RxM: Keyfile succesfully changed\n'
+                        continue
 
 
                 ####################################
@@ -839,206 +1306,304 @@ try:
 
 
                     # Check that CRC32 Matches.
-                    if crc32(ctMACln) == crcPkg:
-                        payload, keyID = ctMACln.split('|')
-                        ciphertext     = base64_decode(payload)
+                    if crc32(ctMACln) != crcPkg:
+                        packet_anomality('crc', 'message')
+                        continue
+
+                    payload, keyID = ctMACln.split('|')
+                    ciphertext     = base64_decode(payload)
 
 
+                    try:
                         # Check that keyID is fresh.
-                        if  int(keyID) < get_keyID(xmpp):
-                            print '\nWARNING! Expired msg key detected!\n'\
-                                  'This might indicate a replay attack!\n'
+                        if int(keyID) < get_keyID(xmpp):
+                            packet_anomality('replay', 'message')
+                            continue
 
-                            if logReplayedEvent:
-                                write_log_entry('', xmpp, 'AUTOMATIC LOG ENTRY: Replayed/malformed message received!')
+                    except KeyError:
+                        packet_anomality('tamper', 'message')
+                        continue
+
+                    except TypeError:
+                        packet_anomality('tamper', 'message')
+                        continue
+
+                    # Check that keyfile for decryption exists.
+                    if not os.path.isfile(xmpp + '.e'):
+                        print '\nError: keyfile for contact ' + xmpp + 'was not found.\n' \
+                              'Message could not be decrypted.\n'
+                        continue
+
+
+                    # Decrypt message if MAC verification succeeds.
+                    MACisValid, decryptedPacket = auth_and_decrypt(xmpp, ciphertext, keyID)
+
+
+                    if not MACisValid:
+                        packet_anomality('MAC', 'message')
+                        continue
+
+
+                    #########################################################
+                    #     Process cancelled messages and file transfers     #
+                    #########################################################
+                    '''
+                    All received message/ file packets have header {s,l,a,e,c}{m,f}.
+
+                    Second character:
+                        m = message
+                        f = file
+
+                    First character:
+                        s = short packet: message can be shown or stored immediately.
+
+                        l = first     packet of long msg / file
+                        a = appended  packet of long msg / file
+                        e = last      packet of long msg / file, can be shown / stored.
+                        c = cancelled packet of long msg / file, discarts packet content.
+
+                    '''
+
+                    # Cancel file.
+                    if decryptedPacket.startswith('cf'):
+                        if fileOnWay[xmpp]:
+                            if xmpp.startswith('me.'):
+                                print 'File transmission to contact \'' + xmpp[3:] + '\' cancelled.\n'
+                            if xmpp.startswith('rx.'):
+                                print 'Contact \'' + xmpp[3:] + '\' cancelled file transmission.\n'
+
+                            fileOnWay[xmpp]    = False
+                            fileReceived[xmpp] = False
+                            fileA[xmpp]        = ''
+                            continue
+
+                    # Cancel message.
+                    if decryptedPacket.startswith('cm'):
+                        if longMsgOnWay[xmpp]:
+                            if xmpp.startswith('me.'):
+                                print 'Long message to contact \'' + xmpp[3:] + '\' cancelled.\n'
+                            if xmpp.startswith('rx.'):
+                                print 'Contact \'' + xmpp[3:] + '\' cancelled long message.\n'
+
+                            longMsgOnWay[xmpp] = False
+                            msgReceived[xmpp]  = False
+                            message[xmpp]      = ''
                             continue
 
 
-                        # Check that keyfile for decryption exists.
-                        if not os.path.isfile(xmpp + '.e'):
-                            print '\nError: keyfile for contact ' + xmpp + 'was\n'\
-                                  'not found.\nMessage could not be decrypted.\n'
+                    #####################################################
+                    #     Process short messages and file transfers     #
+                    #####################################################
+
+                    # Even if cf / cm packet dropped, Rx.py should inform user
+                    # about interrupted reception of long message / file when
+                    # short message / file is received.
+
+                    # Short file.
+                    if decryptedPacket.startswith('sf'):
+                        if fileOnWay[xmpp]:
+                            if xmpp.startswith('me.'):
+                                print 'File transmission to contact \'' + xmpp[3:] + '\' cancelled.\n'
+                            if xmpp.startswith('rx.'):
+                                print 'Contact \'' + xmpp[3:] + '\' cancelled file transmission.\n'
+
+                        if fileSavingAllowed:
+                            fileReceived[xmpp] = True
+                            fileOnWay[xmpp]    = False
+                            fileA[xmpp]        = decryptedPacket[2:]
+
+
+                    # Short message.
+                    if decryptedPacket.startswith('sm'):
+                        if longMsgOnWay[xmpp]:
+                            if xmpp.startswith('me.'):
+                                print 'Long message to contact \'' + xmpp[3:] + '\' cancelled.\n'
+                            if xmpp.startswith('rx.'):
+                                print 'Contact \'' + xmpp[3:] + '\' cancelled long message.\n'
+
+                        msgReceived[xmpp]  = True
+                        longMsgOnWay[xmpp] = False
+                        message[xmpp]      = decryptedPacket[2:]
+
+
+
+                    ####################################################
+                    #     Process long messages and file transfers     #
+                    ####################################################
+
+                    # Header packet of long file.
+                    if decryptedPacket.startswith('lf'):
+                        if fileOnWay[xmpp]:
+                            if xmpp.startswith('me.'):
+                                print 'File transmission to contact \'' + xmpp[3:] + '\' cancelled.\n'
+                            if xmpp.startswith('rx.'):
+                                print 'Contact \'' + xmpp[3:] + '\' cancelled file transmission.\n'
+
+                        # Print notification about receiving file.
+                        if fileSavingAllowed:
+                            if xmpp.startswith('me.'):
+                                print'\nReceiving file sent to \''       + xmpp[3:] + '\'.\n'
+                            if xmpp.startswith('rx.'):
+                                print '\nReceiving file from contact \'' + xmpp[3:] + '\'.\n'
+
+                            fileReceived[xmpp] = False
+                            fileOnWay[xmpp]    = True
+                            fileA[xmpp]        = decryptedPacket[2:]
                             continue
 
 
-                        try:
-                            # Decrypt message if MAC verification succeeds.
-                            MACisValid, plaintext = auth_and_decrypt(xmpp, ciphertext, keyID)
+                    # Header packet of long message.
+                    if decryptedPacket.startswith('lm'):
+                        if longMsgOnWay[xmpp]:
+                            if xmpp.startswith('me.'):
+                                print 'Long message to contact \'' + xmpp[3:] + '\' cancelled.\n'
+                            if xmpp.startswith('rx.'):
+                                print 'Contact \'' + xmpp[3:] + '\' cancelled long message.\n'
 
-                            if MACisValid:
+                        if showLongMsgWarning:
+                            if xmpp.startswith('me.'):
+                                print '\nReceiving long message sent to \''      + xmpp[3:] + '\'.\n'
+                            if xmpp.startswith('rx.'):
+                                print '\nReceiving long message from contact \'' + xmpp[3:] + '\'.\n'
 
-
-                                if plaintext.startswith('s'):
-
-                                    ###########################################
-                                    #     Process short standard messages     #
-                                    ###########################################
-
-                                    if plaintext.startswith('sTFCFILE'):
-                                        if fileSavingAllowed:
-                                            fileReceive  = True
-                                            fileReceived = True
-                                    plaintext = plaintext[1:]
-
-                                else:
-
-                                    ####################################################
-                                    #     Process long messages and file transfers     #
-                                    ####################################################
-
-                                    # Header packet of long message / file.
-                                    if plaintext.startswith('l'):
-                                        if plaintext.startswith('lTFCFILE'):
-
-                                            if fileSavingAllowed:
-                                                print 'Receiving file, this make take a while. You can\'t\n'\
-                                                      'receive messages until you have stored/rejected the file'
-                                                fileReceive = True
-                                        else:
-                                            if showLongMsgWarning:
-                                                print '\n' + 'Receiving long message, please wait...\n'
-
-                                        longMsg[xmpp] = plaintext[1:]
-                                        continue
+                        msgReceived[xmpp]  = False
+                        longMsgOnWay[xmpp] = True
+                        message[xmpp]      = decryptedPacket[2:]
+                        continue
 
 
-                                    # Appended packet of long message / file.
-                                    if plaintext.startswith('a'):
-                                        longMsg[xmpp]  = longMsg[xmpp] + plaintext[1:]
-                                        continue
+                    # Append packet of long file.
+                    if decryptedPacket.startswith('af'):
+                            if fileSavingAllowed:
 
-
-                                    # Final packet of long message / file.
-                                    if plaintext.startswith('e'):
-                                        longMsg[xmpp] = longMsg[xmpp] + plaintext[1:]
-                                        plaintext     = longMsg[xmpp] + '\n'
-                                        if fileReceive:
-                                            fileReceived = True
-
-
-                                if not fileReceive:
-
-                                    ######################################
-                                    #     Process printable messages     #
-                                    ######################################
-
-                                    if xmpp.startswith('me.'):
-                                        nick = 'Me > ' + get_nick('rx' + xmpp[2:])
-                                    else:
-                                        nick = 5 * ' ' + get_nick(xmpp)
-
-                                    # Print message to user.
-                                    if displayTime:
-                                        msgTime = datetime.datetime.now().strftime(displayTimeFmt)
-                                        print msgTime + '  ' + nick + ':  ' + plaintext
-                                    else:
-                                        print                  nick + ':  ' + plaintext
-
-                                # Log messages if logging is enabled.
-                                if logMessages:
-                                    if nick.startswith('Me > '):
-                                        spacing = len(get_nick('rx' + xmpp[2:]))
-                                        nick    = (spacing - 2) * ' ' + 'Me'
-                                        write_log_entry(nick, xmpp[3:], plaintext)
-                                    else:
-                                        write_log_entry(nick[5:], xmpp[3:], plaintext)
-
-
-                                if fileReceive:
-
-                                    ##################################
-                                    #     Process received files     #
-                                    ##################################
-
-                                    if fileSavingAllowed:
-                                        if fileReceived:
-
-                                            discardFile = False
-                                            askFileName = True
-
-                                            while askFileName:
-                                                os.system('clear')
-                                                fileName = raw_input('\nFile Received. Enter filename (\'r\' rejects file): ')
-
-
-                                                if fileName == 'r':
-                                                    print '\nFile Rejected. Continuing\n'
-                                                    plaintext   == ''
-                                                    fileReceive  = False
-                                                    fileReceived = False
-                                                    discardFile  = True
-                                                    askFileName  = False
-                                                    continue
-
-
-                                                else:
-                                                    if os.path.isfile(fileName):
-                                                        overwrite = raw_input('File already exists. Type \'YES\' to overwrite: ')
-
-                                                        if overwrite   == 'YES':
-                                                            askFileName = False
-                                                        continue
-
-                                                    else:
-                                                        askFileName = False
-                                                        continue
-
-                                            if not discardFile:
-
-                                                # Save received base64 data to temporary file and decode it.
-                                                with open('tfcTmpFile', 'w+') as file:
-                                                    file.write(plaintext[7:])
-
-                                                subprocess.Popen('base64 -d tfcTmpFile > ' + fileName,                    shell=True).wait()
-
-                                                # Shred temporary file.
-                                                subprocess.Popen('shred -n ' + str(kfOWIterations) + ' -z -u tfcTmpFile', shell=True).wait()
-
-                                                disp_opsec_warning()
-
-                                            fileReceive  = False
-                                            fileReceived = False
-
-
-                                        else:
-                                            continue
-
-                                    else:
-                                        plaintext == ''
-                                        continue
-
+                                fileReceived[xmpp] = False
+                                fileOnWay[xmpp]    = True
+                                fileA[xmpp]        = fileA[xmpp] + decryptedPacket[2:]
                                 continue
 
+
+                    # Append packet of long message.
+                    if decryptedPacket.startswith('am'):
+
+                            msgReceived[xmpp]  = False
+                            longMsgOnWay[xmpp] = True
+                            message[xmpp]      = message[xmpp] + decryptedPacket[2:]
+                            continue
+
+
+                    #Final packet of long file.
+                    if decryptedPacket.startswith('ef'):
+                        if fileSavingAllowed:
+
+                            fileA[xmpp] = fileA[xmpp] + decryptedPacket[2:]
+
+                            fileContent = fileA[xmpp][:-64]
+                            hashOfFile  = fileA[xmpp][-64:]
+
+                            if keccak_256(fileContent) != hashOfFile:
+                                os.system('clear')
+                                packet_anomality('hash', 'file')
+                                continue
+
+                            fileA[xmpp]        = fileContent
+                            fileReceived[xmpp] = True
+                            fileOnWay[xmpp]    = False
+
+
+                    #Final packet of long message.
+                    if decryptedPacket.startswith('em'):
+
+                        message[xmpp] = message[xmpp] + decryptedPacket[2:]
+
+                        msgContent = message[xmpp][:-64]
+                        hashOfMsg  = message[xmpp][-64:]
+
+                        if keccak_256(msgContent) != hashOfMsg:
+                            os.system('clear')
+
+                            packet_anomality('hash', 'message')
+                            continue
+
+                        message[xmpp]      = msgContent
+                        msgReceived[xmpp]  = True
+                        longMsgOnWay[xmpp] = False
+
+
+
+                    ######################################
+                    #     Process printable messages     #
+                    ######################################
+                    if msgReceived[xmpp]:
+
+                        if xmpp.startswith('me.'):
+                            nick = 'Me > ' + get_nick('rx' + xmpp[2:])
+                        else:
+                            nick = 5 * ' ' + get_nick(xmpp)
+
+
+                        # Print timestamp and message to user.
+                        if displayTime:
+                            msgTime = datetime.datetime.now().strftime(displayTimeFmt)
+                            print msgTime + '  ' + nick + ':  ' + message[xmpp]
+                        else:
+                            print                  nick + ':  ' + message[xmpp]
+
+
+                        # Log messages if logging is enabled.
+                        if logMessages:
+                            if nick.startswith('Me > '):
+                                spacing = len(get_nick('rx' + xmpp[2:]))
+                                nick    = (spacing - 2) * ' ' + 'Me'
+                                write_log_entry(nick, xmpp[3:], message[xmpp])
                             else:
-                                print '\nWARNING! Message authentication failed!\n' \
-                                      'It is possible someone is trying to tamper messages!\n'
-                                if logTamperingEvent:
-                                    write_log_entry('',xmpp, 'EVENT WARNING: Tampered/malformed message received!')
-                                continue
+                                write_log_entry(nick[5:], xmpp[3:], message[xmpp])
+
+                        msgReceived[xmpp]  = False
+                        longMsgOnWay[xmpp] = False
+                        message[xmpp]      = ''
+                        continue
 
 
-                        except TypeError:
-                            print 'WARNING! Received a message, the key-id of which is not valid!\n' \
-                                  'This might indicate tampering or keyfile content mismatch.'
-                            continue
 
+                    ##################################
+                    #     Process received files     #
+                    ##################################
+                    if fileReceived[xmpp]:
+
+                        # Generate random filename.
+                        tmpFileName = 'f.' + str(binascii.hexlify(os.urandom(2))) + '.tfc'
+                        while os.path.isfile(tmpFileName):
+                            tmpFileName = 'f.' + str(binascii.hexlify(os.urandom(2))) + '.tfc'
+
+                        # Store file.
+                        with open(tmpFileName, 'w+') as file:
+                            file.write(fileA[xmpp])
+
+                        if xmpp.startswith('me.'):
+                            print 'File sent to contact \'' + xmpp[3:] + '\' received locally.\n'
+                        if xmpp.startswith('rx.'):
+                            print 'File transmission from contact \'' + xmpp[3:] + '\' complete.\n'
+
+                        print 'Stored base64 encoded file under temporary file name \'' + tmpFileName + '\'.\n'   \
+                              'Use command \'/store ' + tmpFileName[2:][:-4] + ' <desired file name>\' to obtain file or\n'\
+                              'use command \'/store ' + tmpFileName[2:][:-4] + ' r\' to reject file.\n'
+
+                        fileReceived[xmpp] = False
+                        fileOnWay[xmpp]    = False
+                        fileA[xmpp]        = ''
+                        continue
 
                     else:
-                        print '\nCRC checksum error: Message received by RxM was malformed\n.'\
-                                'Note that this error occurred between your NH and RxM so\n'  \
-                                'recipient most likely received the message. If this error\n' \
-                                'is persistent, check the batteries of your RxM data diode.\n'
+                        continue
 
             except IndexError:
                 os.system('clear')
-                print '\nWARNING! Packet format is invalid!\n'\
-                        'This might indicate message tampering!\n'
+                packet_anomality('tamper', 'packet')
                 continue
 
             except ValueError:
                 os.system('clear')
-                print '\nWARNING! Packet format is invalid!\n'\
-                        'This might indicate message tampering!\n'
+                packet_anomality('tamper', 'packet')
                 continue
 
 except KeyboardInterrupt:

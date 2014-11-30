@@ -12,7 +12,7 @@ import time
 ######################################################################
 
 # TFC (OTP Version) || tfcInstaller.py
-version = '0.4.12 beta'
+version = '0.4.13 beta'
 
 """
 This software is part of the TFC application, which is free software:
@@ -27,8 +27,8 @@ for more details. For a copy of the GNU General Public License, see
 <http://www.gnu.org/licenses/>.
 """
 
-# Specify global keyfile size in megabytes.
-megabytes = 2
+# Specify global keyfile size in megaBytes.
+megaBytes = 2
 
 ######################################################################
 #                             APT COMMANDS                           #
@@ -617,7 +617,7 @@ Select configuration that matches your OS:
                     subprocess.Popen('mv NH.py ' + user1 + '/', shell=True).wait()
                     subprocess.Popen('mv tfcOTPInstaller.py ' + user1 + '/', shell=True).wait()
 
-                    subprocess.Popen('dd if=/dev/urandom of=tx.local.e bs=1M count=' + str(megabytes), shell=True).wait()
+                    subprocess.Popen('dd if=/dev/urandom of=tx.local.e bs=1M count=' + str(megaBytes), shell=True).wait()
                     subprocess.Popen('cp tx.local.e rx.local.e', shell=True).wait()
                     subprocess.Popen('mv tx.local.e ' + user1 + '/', shell=True).wait()
                     subprocess.Popen('mv rx.local.e ' + user1 + '/', shell=True).wait()
@@ -628,7 +628,7 @@ Select configuration that matches your OS:
                     print 'Creating keys for user: ' + user1
                     for user2 in userArray:
                         if user1 != user2:
-                            subprocess.Popen('dd if=/dev/urandom of=tx.' + user1 + '.e bs=1M count=' + str(megabytes), shell=True).wait()
+                            subprocess.Popen('dd if=/dev/urandom of=tx.' + user1 + '.e bs=1M count=' + str(megaBytes), shell=True).wait()
                             subprocess.Popen('cp tx.' + user1 + '.e ' + 'me.' + user1 + '.e', shell=True).wait()
                             subprocess.Popen('cp tx.' + user1 + '.e ' + 'rx.' + user2 + '.e', shell=True).wait()
                             subprocess.Popen('mv tx.' + user1 + '.e ' + user2 + '/', shell=True).wait()

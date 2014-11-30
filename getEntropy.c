@@ -24,7 +24,9 @@
 /* This version (getEntropy.c) is modified from avalanche_hour.c
  * by Giorgio Vazzana to be used in TFC suite: github.com/maqp/tfc/
 
- * This version uses faster sampling speed..
+ * This version is suitable for TFC OTP 0.4.13.
+
+ * This version uses faster sampling speed.
 
  * Original source code is available at
  * http://holdenc.altervista.org/avalanche/downloads/avalanche-test-utils.tgz

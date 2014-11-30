@@ -10,7 +10,7 @@ import readline
 import serial
 import subprocess
 import sys
-from time import sleep
+import time
 
 
 
@@ -19,7 +19,7 @@ from time import sleep
 ######################################################################
 
 # TFC (OTP Version) || Tx.py
-version = '0.4.12 beta'
+version = '0.4.13 beta'
 
 """
 This software is part of the TFC application, which is free software:
@@ -40,7 +40,6 @@ for more details. For a copy of the GNU General Public License, see
 #                            CONFIGURATION                           #
 ######################################################################
 
-
 PkgSize            = 140
 keyThreshold       = 5
 maxSleepTime       = 13
@@ -52,8 +51,7 @@ debugging          = False
 emergencyExit      = False
 checkKeyHashes     = False
 randomSleep        = False
-localTesting       = False
-
+localTesting       = True
 
 if not localTesting:
     port        = serial.Serial('/dev/ttyAMA0', baudrate=9600, timeout=0.1)
@@ -902,7 +900,8 @@ def get_autotabs(contacts):
     # Add commands to autoTabs.
     cList = ['about' , 'add '  , 'clear', 'create ' , 'exit',
              'file ' , 'group ', 'help' , 'logging ', 'msg ',
-             'newkf ', 'nick ' , 'quit' , 'rm '     , 'select ']
+             'newkf ', 'nick ' , 'quit' , 'rm '     , 'select ',
+             'store ']
 
     for command in cList:
         autoTabs.append(command)
@@ -966,12 +965,12 @@ def search_keyfiles():
     keyfiles  = []
     keyfiles += [each for each in os.listdir('.') if each.endswith('.e')]
     if not keyfiles:
-        exit_with_msg('Error: No keyfiles for contacts were found.\n'\
+        exit_with_msg('Error: No keyfiles for contacts were found.\n'
                       'Make sure keyfiles are in same directory as Tx.py.')
 
 
 
-def key_blacklist_chk(key, xmpp):
+def key_blacklist_chk(key):
     try:
         keyHash = keccak_256(key)
         with open('usedKeys.tfc', 'a+') as file:
@@ -1041,24 +1040,49 @@ def padding(string):
 
 def long_msg_preprocess(string):
 
-    string = string.strip('\n')
-    msgA   = [string[i:i + (PkgSize - 2)] for i in range(0, len(string), (PkgSize - 2) )] # Each packet is left one char shorter than padding to prevent dummy blocks.
+    preprocessFile = False
+    preprocessMsg  = False
 
-    for i in xrange( len(msgA) ):          # Add 'a' in front of every packet.
-        msgA[i] = 'a' + msgA[i]            # 'a' tells Rx.py the message should be appended to long message.
+    # Strip leading white space.
+    while string.startswith(' '):
+        string = string[1:]
 
-                                           # Replace 'a' with 'e' in last packet.
-    msgA[-1] = 'e' + msgA[-1][1:]          # 'e' tells Rx.py the message is last one of long message, so Rx.py knows it must show the entire long message.
+    # Remove 'm' from start of string.
+    if string.startswith('m'):
+        preprocessMsg = True
+    if string.startswith('f'):
+        preprocessFile = True
 
-                                           # Replace 'a' with 'l' in first packet.
-    msgA[0]  = 'l' + msgA[0][1:]           # 'l' tells Rx.py the message extends over multiple packets.
+    # Remove new lines and 'm' or 'f' header.
+    string  = string[1:].strip('\n')
+
+    # Append cryptographic hash of message / file to packet.
+    string  = string + keccak_256(string)
+
+    # Split packet to list the items of which are 3 char shorter than max length:
+    # This leaves room for 2 char header and prevents dummy blocks when padding.
+    packetA = [string[i:i + (PkgSize - 3)] for i in range(0, len(string), (PkgSize - 3))]
+
+
+    if preprocessMsg:                        # All packets to recipients have header {s,l,a,e}{m,f}.
+        for i in xrange(len(packetA)):
+            packetA[i] = 'am' + packetA[i]   # 'am' stands for appended message packets.
+        packetA[-1] = 'em' + packetA[-1][2:] # 'em' stands for end message packets.
+        packetA[0]  = 'lm' + packetA[0][2:]  # 'lm' stands for start of long message packets.
+
+    if preprocessFile:
+        for i in xrange(len(packetA)):
+            packetA[i] = 'af' + packetA[i]   # 'af' stands for appended file packets.
+        packetA[-1] = 'ef' + packetA[-1][2:] # 'ef' stands for end file packets.
+        packetA[0]  = 'lf' + packetA[0][2:]  # 'lf' stands for start of long file packets.
+
 
     if debugging:
-        print 'M(long_msg_preprocess): Processed long message to following packets:'
-        for item in msgA:
+        print '\nM(long_msg_preprocess): Processed long message to following packets:'
+        for item in packetA:
             print '"' + item + '"'
 
-    return msgA
+    return packetA
 
 
 
@@ -1066,9 +1090,10 @@ def long_msg_process(userInput, xmpp):
 
     packetList = long_msg_preprocess(userInput)
 
-    print '\nTransferring message in ' + str(len(packetList)) + ' parts. ^C cancels'
-
-    halt = False
+    if userInput.startswith('f'):
+        print '\nTransferring file over ' + str(len(packetList)) + ' packets. ^C cancels'
+    if userInput.startswith('m'):
+        print '\nTransferring message over ' + str(len(packetList)) + ' packets. ^C cancels'
 
     # Check that enough key data is remaining.
     if count_remaining_keys(xmpp) < len(packetList):
@@ -1077,14 +1102,6 @@ def long_msg_process(userInput, xmpp):
         return None
 
     for packet in packetList:
-
-        if halt:
-            os.system('clear')
-            if userInput.startswith('TFCFILE'):
-                print '\nFile transmission interrupted by user.\n'
-            else:
-                print '\nMessage transmission interrupted by user.\n'
-            return None
 
         try:
             keyID     = get_keyID(xmpp)
@@ -1101,15 +1118,41 @@ def long_msg_process(userInput, xmpp):
             if randomSleep:
                 sleepTime = random.uniform(0, maxSleepTime)
                 print 'Sleeping ' + str(sleepTime) + ' seconds to obfuscate long message.'
-                sleep(sleepTime)
+                time.sleep(sleepTime)
 
             print_kf_status(xmpp)
 
             # Minimum sleep time ensures XMPP server is not flooded.
-            sleep(lMsgSleep)
+            time.sleep(lMsgSleep)
 
         except KeyboardInterrupt:
-            halt = True
+
+            # If user interrupts packet transmission, send encrypted notification.
+            os.system('clear')
+            if userInput.startswith('f'):
+                print '\nFile transmission interrupted by user.\n'
+                cancelMsg = 'cf'
+            else:
+                print '\nMessage transmission interrupted by user.\n'
+                cancelMsg = 'cm'
+
+            keyID     = get_keyID(xmpp)
+
+            paddedMsg = padding(cancelMsg)
+            ctWithTag = encrypt(xmpp, paddedMsg)
+
+            encoded   = b64e(ctWithTag)
+            checksum  = crc32(encoded + '|' + str(keyID))
+
+
+            output_message(xmpp, encoded, keyID, checksum)
+
+            return None
+
+    if userInput.startswith('f'):
+        print '\nFile transmission complete.\n'
+    if userInput.startswith('m'):
+        print '\nMessage transmission complete.\n'
 
 
 
@@ -1121,8 +1164,8 @@ def short_msg_process(plaintext, xmpp):
         return None
 
     keyID     = get_keyID(xmpp)
-
-    paddedMsg = padding('s' + plaintext) # 's' tells Rx.py the message is only one packet long.
+                                         # All packets to recipients have header {s,l,a,e}{m,f}.
+    paddedMsg = padding('s' + plaintext) # 's' stands for single packet messages.
     ctWithTag = encrypt(xmpp, paddedMsg)
 
     encoded  = b64e(ctWithTag)
@@ -1146,15 +1189,17 @@ def cmd_msg_process(command):
 
 
 
-def quit_process(output = False):
+def quit_process(output=False):
     os.system('clear')
+
     if output:
         print '\nExiting TFC\n'
+
     if localTesting:
         with open('TxOutput', 'w+') as file:
-            file.write('exitTFC\n')
+            file.write('EXITTFC\n')
     else:
-        port.write('exitTFC\n')
+        port.write('EXITTFC\n')
     exit()
 
 
@@ -1220,12 +1265,14 @@ def print_help():
         print '/file <filename>\nSend file to recipient'                      + le
         print '/nick <nick>\nChange contact nickname'                         + le
         print '/quit & /exit\nExit TFC'                                       + le
+        print '/store <b64 file> <output file>\nDecodes received file'        + le
         print '/group\nList group members'                                    + le
         print '/groups\nList available groups'                                + le
         print '/group <groupname>\nSelect group'                              + le
         print '/group create <groupname> <xmpp1> <xmpp2>\nCreate new group'   + le
         print '/group add <groupname> <xmpp1> <xmpp2>\nAdd xmpp to group'     + le
         print '/group rm <groupname> <xmpp1> <xmpp2>\nRemove xmpp from group' + le
+        print '/store <tmp f.name> <output f.name>\nSave received tmp file'   + le
         print '/shift + PgUp/PgDn\nScroll terminal up/dn'                     + le
         print '/newkf tx <contactXMPP> 1.kf\nChange keyfile for sending'      + le
         print '/newkf rx <contactXMPP> 1.kf\nChange keyfile for receiving'    + le
@@ -1247,13 +1294,16 @@ def print_help():
         print       ' /paste'                                      + 16 * ' ' + 'Enable paste-mode'
         print       ' /nick <nick>'                                + 10 * ' ' + 'Change contact\'s nickname on Tx.py & Rx.py'
         print       ' /quit & /exit'                               + 9  * ' ' + 'Exits TFC'
+        print                                                      ttyW * '-'
         print       ' /group'                                      + 16 * ' ' + 'List group members'
         print       ' /groups'                                     + 15 * ' ' + 'List available groups'
         print       ' /group <groupname>'                          + 4  * ' ' + 'Select group\n'
-        print       ' /group create <groupname> <xmpp1> <xmpp2>'   + 5  * ' ' + '\n Create new group called <groupname>, add list of xmpp-addresses.\n'
-        print       ' /group add <groupname> <xmpp1> <xmpp2>'      + 8  * ' ' + '\n Add xmpp-addresses to group <groupname>\n'
-        print       ' /group rm <groupname> <xmpp1> <xmpp2>'       + 8  * ' ' + '\n Remove xmpp-addresses from group <groupname>\n'
-        print       ' shift + PgUp/PgDn'                           + 5  * ' ' + 'Scroll terminal up/down\n'
+        print       ' /group create <groupname> <xmpp1> <xmpp2>'   + 1  * ' ' + '\n Create new group called <groupname>, add xmpp-addresses.\n'
+        print       ' /group add <groupname> <xmpp1> <xmpp2>'      + 1  * ' ' + '\n Add xmpp-addresses to group <groupname>\n'
+        print       ' /group rm <groupname> <xmpp1> <xmpp2>'       + 1  * ' ' + '\n Remove xmpp-addresses from group <groupname>'
+        print                                                      ttyW * '-'
+        print       ' /store <b64 file name> <file name>'          + 1  * ' ' + '\n Decodes received tmp file and stores it as <file name> \n'
+        print       ' shift + PgUp/PgDn'                           + 1  * ' ' + '\n Scroll terminal up/down\n'
 
         print       ' /newkf tx alice@jabber.org 2.kf\n '          + 31 * '-'
         print       ' Overwrites current key used to encrypt messages sent to\n'  \
@@ -1291,15 +1341,16 @@ def print_list_of_contacts():
         print ttyW * '-'
 
     for xmpp in keyFileNames:
-        iD      = keyFileNames.index(xmpp)
+        ID      = keyFileNames.index(xmpp)
         nick    = get_nick(xmpp[:-2])
-        keysRem = str(count_remaining_keys(xmpp[:-2]))
         xmpp    = xmpp[:-2][3:]
+        keysRem = str(count_remaining_keys(xmpp[:-2]))
+
         if nick != 'tx.local':
 
             if ttyW < headerLen:
                 print cShortList[0] + ': ' + (10 -len(cShortList[0])) * ' ' + xmpp
-                print cShortList[1] + ': ' + (10 -len(cShortList[1])) * ' ' + str(iD)
+                print cShortList[1] + ': ' + (10 -len(cShortList[1])) * ' ' + str(ID)
                 print cShortList[2] + ': ' + (10 -len(cShortList[2])) * ' ' + nick
                 print cShortList[3] + ': ' + (10 -len(cShortList[3])) * ' ' + str(keysRem)
                 print ttyW * '-'
@@ -1307,9 +1358,9 @@ def print_list_of_contacts():
 
             else:
                 dst1 = int(header.index(cShortList[1][0])) - len(xmpp)                                              # Dev note: This will cause problems with translations
-                dst2 = int(header.index(cShortList[2][0])) - len(xmpp) - dst1 - len(str(iD))                        # Try to name header names so that each
-                dst3 = int(header.index(cShortList[3][1])) - len(xmpp) - dst1 - len(str(iD)) - dst2 - len(nick) - 1 # column will have it's own index letter.
-                print xmpp + dst1 * ' ' + str(iD) + dst2 * ' ' + nick + dst3 * ' ' + keysRem
+                dst2 = int(header.index(cShortList[2][0])) - len(xmpp) - dst1 - len(str(ID))                        # Try to name header names so that each
+                dst3 = int(header.index(cShortList[3][1])) - len(xmpp) - dst1 - len(str(ID)) - dst2 - len(nick) - 1 # column will have it's own index letter.
+                print xmpp + dst1 * ' ' + str(ID) + dst2 * ' ' + nick + dst3 * ' ' + keysRem
                 idSelDist = int(header.index(cShortList[1][0]))
 
     for item in keyFileNames:
@@ -1412,7 +1463,7 @@ def exit_with_msg(message, error=True):
 #                          GROUP MANAGEMENT                          #
 ######################################################################
 
-def group_create(groupName, newMembers = []):
+def group_create(groupName, newMembers=[]):
 
     if os.path.isfile('g.' + groupName + '.tfc'):
         if not (raw_input('Group \'' + groupName + '\' already exists. Type YES to overwrite: ') == 'YES'):
@@ -1629,13 +1680,13 @@ while True:
             lines     = sys.stdin.readlines()
             userInput = '\n' + ''.join(lines)
             print '\nSending...'
-            sleep(0.1)
+            time.sleep(0.1)
 
         except KeyboardInterrupt:
             pastemode = False
             userInput = ''
             print '\nClosing paste mode...'
-            sleep(0.4)
+            time.sleep(0.4)
             os.system('clear')
             continue
 
@@ -1823,12 +1874,13 @@ while True:
     if userInput == '  ' or userInput == '/clear':
         if localTesting:
             with open('TxOutput', 'w+') as file:
-                file.write('clearScreen ' + xmpp + '\n')
+                file.write('CLEARSCREEN ' + xmpp + '\n')
         else:
-            port.write('clearScreen ' + xmpp + '\n')
+            port.write('CLEARSCREEN ' + xmpp + '\n')
 
         os.system('clear')
         continue
+
 
     if userInput == '/quit' or userInput == '/exit':
         quit_process(True)
@@ -1914,7 +1966,7 @@ while True:
 
                 selectedGroup = ''
                 os.system('clear')
-                print 'Now sending messages to ' + nick + ' (' + xmpp + ')\n'
+                print 'Now sending messages to ' + nick + ' (' + xmpp[3:] + ')\n'
                 continue
 
         except ValueError:
@@ -1927,11 +1979,11 @@ while True:
 
 
     ##################################################################
-    ##                      COMMANDS TO RX.py                       ##
+    ##                      ENCRYPTED COMMANDS                      ##
     ##################################################################
 
-    if userInput.startswith('/nick ') or userInput.startswith('/logging ') or userInput.startswith('/newkf '):
-        command    = ''
+    if userInput.startswith('/nick ') or userInput.startswith('/logging ') or userInput.startswith('/store ') or userInput.startswith('/newkf '):
+        command = ''
 
         # Check that local keyfile exists.
         if not os.path.isfile('tx.local.e'):
@@ -1942,6 +1994,7 @@ while True:
         if count_remaining_keys('tx.local') < 1:
             print '\nError: No local keys remaining. Command was not sent.\n'
             continue
+
 
         ################
         #     NICK     #
@@ -1961,9 +2014,11 @@ while True:
             if '=' in newNick or '/' in newNick:
                 print '\nError: Nick can not contain reserved characters / or =\n'
                 continue
+
             if (newNick == 'tx.local') or (newNick == 'rx.local'):
                 print '\nError: Can\'t give reserved nick of local.e to contact.\n'
                 continue
+
             if newNick in groupFileList:
                 print '\nError: Nick is in use for group.\n'
                 continue
@@ -1973,7 +2028,7 @@ while True:
 
             os.system('clear')
             print '\nChanged ' + xmpp[3:] + ' nick to ' + nick + '\n'
-            command = 'rx.' + xmpp[3:] + '/nick=' + nick
+            command = 'NICK rx.' + xmpp[3:] + ' ' + nick
 
 
         ###################
@@ -1984,13 +2039,25 @@ while True:
             value = str(userInput.split(' ')[1])
 
             if value   == 'on':
-                command = 'logson'
+                command = 'LOGSON'
 
             elif value == 'off':
-                command = 'logsoff'
+                command = 'LOGSOFF'
 
             else:
                 print '\nError: Invalid command\n'
+                continue
+
+
+        ########################
+        #     FILE STORING     #
+        ########################
+        if userInput.startswith('/store '):
+            try:
+                params  = userInput.split(' ')
+                command = 'STOREFILE ' + params[1] + ' ' + params[2]
+            except IndexError:
+                print '\nError: Invalid command.\n'
                 continue
 
 
@@ -2029,7 +2096,7 @@ while True:
                           'on TxM and me.' + contactXmpp + '.e on RxM!\n'
 
                     if raw_input('\nAre you sure? Type uppercase \'YES\' to continue: ' ) == 'YES':
-                        command     = 'tfckf me.' + contactXmpp + ' me.' + keyFileName
+                        command = 'tfckf me.' + contactXmpp + ' me.' + keyFileName
                         print '\nTxM > RxM: Shred keyfile me.' + contactXmpp + '.e and start using \'me.' + keyFileName + '\''
 
                     else:
@@ -2058,16 +2125,31 @@ while True:
                 continue
 
 
+        if userInput.startswith('/') and not userInput.startswith('/file '):
+            os.system('clear')
+            print '\nError: Unknown command \'' + userInput + '\'\n'
+            continue
+
+
         ########################
         #    COMMAND PACKET    #
         ########################
-
         cmd_msg_process(command)
-
         if command.startswith('tfckf me'):
             new_keyfile()
-
         continue
+
+
+
+    ################################
+    #     PACKETS TO RECIPIENT     #
+    ################################
+
+    # All packets to recipients have header {s,l,a,e}{m,f}. 'm' stands for message.
+    if not userInput.startswith('/file '):
+        userInput = 'm' + userInput
+
+
 
     #############################
     #     FILE TRANSMISSION     #
@@ -2076,6 +2158,10 @@ while True:
     if userInput.startswith('/file '):
 
         fileName = userInput.split(' ')[1]
+        if not os.path.isfile(fileName):
+            print '\nError: Could not find file' + fileName + '\n'
+            continue
+
 
         if nick in groupFileList:
             sendTarget = 'all members of group \'' + nick + '\''
@@ -2088,21 +2174,21 @@ while True:
 
             with open('TFCtmpFile', 'r') as file:
                 b64File     = file.readlines()
-                fileMessage = ''
+                fileContent = ''
                 for line in b64File:
-                    fileMessage += line
+                    fileContent += line
 
-
-            if fileMessage == '':
+            if fileContent == '':
                 os.system('clear')
-                print 'Error: No file \'' + fileName + '\' found. Transmission aborted.\n'
+                print 'Error: target file \'' + fileName + '\'  was empty. Transmission aborted.\n'
+                continue
 
-
-            userInput = 'TFCFILE' + fileMessage
+            # All packets to recipients have header {s,l,a,e}{m,f}. 'f' stands for file.
+            userInput = 'f' + fileContent
             subprocess.Popen('shred -n ' + str(shredIterations) + ' -z -u TFCtmpFile', shell=True).wait()
 
             os.system('clear')
-            print '\nSending file ' + fileName + '\n'
+            print '\nSending file ' + fileName
 
         else:
             print '\nFile sending aborted\n'
@@ -2126,7 +2212,10 @@ while True:
 
         if not groupMemberList:
             os.system('clear')
-            print 'Current group is empty. No message was sent.\n'
+            if userInput.startswith('f'):
+                print 'Currently selected group is empty. No file was sent.\n'
+            if userInput.startswith('m'):
+                print 'Currently selected group is empty. No message was sent.\n'
             continue
 
         for member in groupMemberList:
@@ -2140,7 +2229,7 @@ while True:
                 short_msg_process(userInput, xmpp)
                 print_kf_status(xmpp)
 
-        sleep(0.1)
+        time.sleep(0.1)
         print ''
 
 

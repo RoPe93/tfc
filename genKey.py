@@ -14,7 +14,7 @@ import sys
 ######################################################################
 
 # TFC (OTP Version) || genKey.py
-version = '0.4.12 beta'
+version = '0.4.13 beta'
 
 """
 This software is part of the TFC application, which is free software:

@@ -15,6 +15,12 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
+/* This version is suitable for TFC OTP 0.4.13.
+ *
+ * Original source code is available at
+ * http://holdenc.altervista.org/avalanche/downloads/avalanche-test-utils.tgz
+ */
+
 // Compile: gcc -Wall -O deskew.c -o deskew
 
 #include <stdio.h>
