@@ -20,7 +20,7 @@ from time             import sleep
 ######################################################################
 
 # TFC (OTP Version) || NH.py
-version = 'CEV 0.4.13 beta'
+version = '0.4.13 beta'
 
 """
 This software is part of the TFC application, which is free software:
