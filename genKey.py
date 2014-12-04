@@ -55,7 +55,7 @@ createCopies    = False     # Create copies of key for your and recipient's RxM.
 #                              ARGUMENTS                             #
 ######################################################################
 
-#Initial Values, do not edit.
+# Initial Values, do not edit.
 HWRNGEntropy    = False
 kernelEntropy   = False
 mixedEntropy    = False
@@ -66,10 +66,11 @@ defOFile        = False
 def showHelp():
     print '\nUsage: python genKey.py [OPTIONS]... OUTPUT_FILE\n\n'                         \
     '  -k, --kernel'    + 7  * ' ' + 'Use /dev/(u)random as entropy source.\n'             \
-    '  -h, --hwrng'     + 8  * ' ' + 'Use HW RNG as entropy source.\n'                     \
-    '  -x, --mixed'     + 8  * ' ' + 'Use HW RNG as source and XOR it with equal amount\n' \
-                        + 21 * ' ' + 'of entropy from kernel. (Most secure option).\n\n'  
+    '  -h, --hwrng'     + 8  * ' ' + 'Use HWRNG as entropy source.\n'                     \
+    '  -x, --mixed'     + 8  * ' ' + 'Use HWRNG as source and XOR it with equal amount\n' \
+                        + 21 * ' ' + 'of entropy from kernel. (Most secure option).\n\n'
     exit()
+
 
 
 try:
@@ -530,7 +531,7 @@ def keccak_256(hashInput):
 
 def get_hwrng_entropy():
 
-    print 'Sampling randomness from HW RNG device. End with Ctrl + C\n'
+    print 'Sampling randomness from HWRNG device. End with Ctrl + C\n'
     try:
         subprocess.Popen('sudo ./getEntropy', shell=True).wait()
     except KeyboardInterrupt:
@@ -540,7 +541,7 @@ def get_hwrng_entropy():
     print '\nTFC ' + version + ' || Key generator || Mode: ' + mode + '\n\n'
     if defOFile:
         print 'Specified output file: ' + outputFile + '\n'
-    print 'Sampling randomness from HW RNG device. End with Ctrl + C\nEnded by user.'
+    print 'Sampling randomness from HWRNG device. End with Ctrl + C\nEnded by user.'
 
     print '\nApplying VN whitening on entropy...'
     subprocess.Popen('cat ' + 'HWRNGEntropy' + ' | ./deskew > ' + 'whitened', shell=True).wait()
@@ -624,7 +625,7 @@ def get_kernel_entropy(size=0):
             with open('kernel_ent', 'rb') as file:
                 entropy = file.readline()
 
-        print '\nShredding temporary entropy file...'
+        print '\nShredding kernel entropy tmp file...'
         subprocess.Popen('shred -n ' + str(shredIterations) + ' -z -u kernel_ent', shell=True).wait()
 
     else:
@@ -684,7 +685,7 @@ if mixedEntropy:
 if keccakWhitening:
 
     # Split entropy to 256-bit blocks
-    entropyBlocks = [entropy[x:x+32] for x in range(0,len(entropy),32)]
+    entropyBlocks = [entropy[x:x+32] for x in range(0, len(entropy), 32)]
     entropy       = ''
 
     # Hash each block separately and create new entropy string.
@@ -695,7 +696,7 @@ if keccakWhitening:
         entropy  = entropy + whitened
 
 
-if not kernelEntropy:
+if HWRNGEntropy:
     print 'Done.\n'
 
 print 'Storing entropy file...'
@@ -719,7 +720,7 @@ if EntAnalyze:
 
 if Dieharder:
     with open(outputFile, 'rb') as file:
-        file.seek(0,2)
+        file.seek(0, 2)
         keyFileSize = file.tell()
 
     if (keyFileSize < 12582912):
