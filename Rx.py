@@ -1376,16 +1376,17 @@ try:
 
                     # Cancel file.
                     if decryptedPacket.startswith('cf'):
-                        if fileOnWay[xmpp]:
-                            if xmpp.startswith('me.'):
-                                print 'File transmission to contact \'' + xmpp[3:] + '\' cancelled.\n'
-                            if xmpp.startswith('rx.'):
-                                print 'Contact \'' + xmpp[3:] + '\' cancelled file transmission.\n'
+                        if fileSavingAllowed:
+                            if fileOnWay[xmpp]:
+                                if xmpp.startswith('me.'):
+                                    print 'File transmission to contact \'' + xmpp[3:] + '\' cancelled.\n'
+                                if xmpp.startswith('rx.'):
+                                    print 'Contact \'' + xmpp[3:] + '\' cancelled file transmission.\n'
 
-                            fileOnWay[xmpp]    = False
-                            fileReceived[xmpp] = False
-                            fileA[xmpp]        = ''
-                            continue
+                                fileOnWay[xmpp]    = False
+                                fileReceived[xmpp] = False
+                                fileA[xmpp]        = ''
+                                continue
 
                     # Cancel message.
                     if decryptedPacket.startswith('cm'):
@@ -1411,16 +1412,16 @@ try:
 
                     # Short file.
                     if decryptedPacket.startswith('sf'):
-                        if fileOnWay[xmpp]:
-                            if xmpp.startswith('me.'):
-                                print 'File transmission to contact \'' + xmpp[3:] + '\' cancelled.\n'
-                            if xmpp.startswith('rx.'):
-                                print 'Contact \'' + xmpp[3:] + '\' cancelled file transmission.\n'
-
                         if fileSavingAllowed:
-                            fileReceived[xmpp] = True
-                            fileOnWay[xmpp]    = False
-                            fileA[xmpp]        = decryptedPacket[2:]
+                            if fileOnWay[xmpp]:
+                                if xmpp.startswith('me.'):
+                                    print 'File transmission to contact \'' + xmpp[3:] + '\' cancelled.\n'
+                                if xmpp.startswith('rx.'):
+                                    print 'Contact \'' + xmpp[3:] + '\' cancelled file transmission.\n'
+
+                                fileReceived[xmpp] = True
+                                fileOnWay[xmpp]    = False
+                                fileA[xmpp]        = decryptedPacket[2:]
 
 
                     # Short message.
@@ -1443,14 +1444,14 @@ try:
 
                     # Header packet of long file.
                     if decryptedPacket.startswith('lf'):
-                        if fileOnWay[xmpp]:
-                            if xmpp.startswith('me.'):
-                                print 'File transmission to contact \'' + xmpp[3:] + '\' cancelled.\n'
-                            if xmpp.startswith('rx.'):
-                                print 'Contact \'' + xmpp[3:] + '\' cancelled file transmission.\n'
-
-                        # Print notification about receiving file.
                         if fileSavingAllowed:
+                            if fileOnWay[xmpp]:
+                                if xmpp.startswith('me.'):
+                                    print 'File transmission to contact \'' + xmpp[3:] + '\' cancelled.\n'
+                                if xmpp.startswith('rx.'):
+                                    print 'Contact \'' + xmpp[3:] + '\' cancelled file transmission.\n'
+
+                            # Print notification about receiving file.
                             if xmpp.startswith('me.'):
                                 print'\nReceiving file sent to \''       + xmpp[3:] + '\'.\n'
                             if xmpp.startswith('rx.'):
@@ -1485,7 +1486,6 @@ try:
                     # Append packet of long file.
                     if decryptedPacket.startswith('af'):
                             if fileSavingAllowed:
-
                                 fileReceived[xmpp] = False
                                 fileOnWay[xmpp]    = True
                                 fileA[xmpp]        = fileA[xmpp] + decryptedPacket[2:]
@@ -1494,7 +1494,6 @@ try:
 
                     # Append packet of long message.
                     if decryptedPacket.startswith('am'):
-
                             msgReceived[xmpp]  = False
                             longMsgOnWay[xmpp] = True
                             message[xmpp]      = message[xmpp] + decryptedPacket[2:]
@@ -1504,9 +1503,7 @@ try:
                     #Final packet of long file.
                     if decryptedPacket.startswith('ef'):
                         if fileSavingAllowed:
-
                             fileA[xmpp] = fileA[xmpp] + decryptedPacket[2:]
-
                             fileContent = fileA[xmpp][:-64]
                             hashOfFile  = fileA[xmpp][-64:]
 
@@ -1522,9 +1519,7 @@ try:
 
                     #Final packet of long message.
                     if decryptedPacket.startswith('em'):
-
                         message[xmpp] = message[xmpp] + decryptedPacket[2:]
-
                         msgContent = message[xmpp][:-64]
                         hashOfMsg  = message[xmpp][-64:]
 
@@ -1578,33 +1573,31 @@ try:
                     ##################################
                     #     Process received files     #
                     ##################################
-                    if fileReceived[xmpp]:
+                    if fileSavingAllowed:
+                        if fileReceived[xmpp]:
 
-                        # Generate random filename.
-                        tmpFileName = 'f.' + str(binascii.hexlify(os.urandom(2))) + '.tfc'
-                        while os.path.isfile(tmpFileName):
+                            # Generate random filename.
                             tmpFileName = 'f.' + str(binascii.hexlify(os.urandom(2))) + '.tfc'
+                            while os.path.isfile(tmpFileName):
+                                tmpFileName = 'f.' + str(binascii.hexlify(os.urandom(2))) + '.tfc'
 
-                        # Store file.
-                        with open(tmpFileName, 'w+') as file:
-                            file.write(fileA[xmpp])
+                            # Store file.
+                            with open(tmpFileName, 'w+') as file:
+                                file.write(fileA[xmpp])
 
-                        if xmpp.startswith('me.'):
-                            print 'File sent to contact \'' + xmpp[3:] + '\' received locally.\n'
-                        if xmpp.startswith('rx.'):
-                            print 'File transmission from contact \'' + xmpp[3:] + '\' complete.\n'
+                            if xmpp.startswith('me.'):
+                                print 'File sent to contact \'' + xmpp[3:] + '\' received locally.\n'
+                            if xmpp.startswith('rx.'):
+                                print 'File transmission from contact \'' + xmpp[3:] + '\' complete.\n'
 
-                        print 'Stored base64 encoded file under temporary file name \'' + tmpFileName + '\'.\n'   \
-                              'Use command \'/store ' + tmpFileName[2:][:-4] + ' <desired file name>\' to obtain file or\n'\
-                              'use command \'/store ' + tmpFileName[2:][:-4] + ' r\' to reject file.\n'
+                            print 'Stored base64 encoded file under temporary file name \'' + tmpFileName + '\'.\n'   \
+                                  'Use command \'/store ' + tmpFileName[2:][:-4] + ' <desired file name>\' to obtain file or\n'\
+                                  'use command \'/store ' + tmpFileName[2:][:-4] + ' r\' to reject file.\n'
 
-                        fileReceived[xmpp] = False
-                        fileOnWay[xmpp]    = False
-                        fileA[xmpp]        = ''
-                        continue
-
-                    else:
-                        continue
+                            fileReceived[xmpp] = False
+                            fileOnWay[xmpp]    = False
+                            fileA[xmpp]        = ''
+                            continue
 
             except IndexError:
                 os.system('clear')
