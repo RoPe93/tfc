@@ -59,6 +59,7 @@ PkgSize            = 140
 localTesting       = False
 
 
+
 if not localTesting:
     port        = serial.Serial('/dev/ttyAMA0', baudrate=9600, timeout=0.1)
 
@@ -1287,22 +1288,22 @@ try:
 
                         # Shred entropy file
                         if cXMPP.startswith('me.'):
-                            print '\nRxM: Shredding current keyfile that decrypts\nmessages your TxM sends to ' + cXMPP[3:] + '\n'
+                            print '\nShredding current keyfile that decrypts\nmessages your TxM sends to ' + cXMPP[3:] + '\n'
                         else:
                             cXMPP = 'rx.' + cXMPP
-                            print '\nRxM: Shredding current keyfile that decrypts\nmessages sent to you by ' + cXMPP[3:] + '\n'
+                            print '\nShredding current keyfile that decrypts\nmessages sent to you by ' + cXMPP[3:] + '\n'
                         subprocess.Popen('shred -n ' + str(shredIterations) + ' -z -u ' + cXMPP + '.e', shell=True).wait()
 
                         # Move new entropy file in place
-                        print 'RxM: Replacing the keyfile ' + cXMPP + ' with file \'' + newKf + '\''
+                        print 'Replacing the keyfile ' + cXMPP + ' with file \'' + newKf + '\''
                         subprocess.Popen('mv ' + newKf + ' ' + cXMPP + '.e', shell=True).wait()
 
                         # Reset keyID
-                        print 'RxM: Resetting key number to 1 for ' + cXMPP[3:]
+                        print 'Resetting key number to 1 for ' + cXMPP[3:]
                         write_keyID(cXMPP, 1)
 
                         # Process encryption keys and keyID
-                        print 'RxM: Keyfile succesfully changed\n'
+                        print 'Keyfile succesfully changed\n'
                         continue
 
 

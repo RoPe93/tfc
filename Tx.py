@@ -55,6 +55,7 @@ localTesting       = False
 
 
 
+
 if not localTesting:
     port        = serial.Serial('/dev/ttyAMA0', baudrate=9600, timeout=0.1)
 
@@ -603,13 +604,13 @@ def new_keyfile():
     print 'Shredding keyfile that encrypts messages to ' + contactXmpp
     subprocess.Popen('shred -n ' + str(shredIterations) + ' -z -u ' + 'tx.' + contactXmpp + '.e', shell=True).wait()
 
-    print 'TxM: Replacing the keyfile for ' + contactXmpp + ' with \'' + keyFileName + '\''
+    print 'Replacing the keyfile for ' + contactXmpp + ' with \'' + keyFileName + '\''
     subprocess.Popen('mv ' + keyFileName + ' ' + 'tx.' + contactXmpp + '.e', shell=True).wait()
 
-    print 'TxM: Setting key number to 1 for ' + contactXmpp
+    print 'Setting key number to 1 for ' + contactXmpp
     write_keyID('tx.' + contactXmpp, 1)
 
-    print 'TxM: Keyfile successfully changed\n'
+    print 'Keyfile successfully changed\n'
 
 
 
@@ -933,7 +934,7 @@ def print_kf_status(xmpp):
         if xmpp == 'tx.local':
             print 'Commands remaining: ' + str(keysLeft)
         else:
-            print xmpp[3:] + ': Messages remaining: ' + str(keysLeft)
+            print '\n' + xmpp[3:] + ': Messages remaining: ' + str(keysLeft) + '\n'
 
 
 
@@ -2110,7 +2111,7 @@ while True:
                           'destroy current keyfile tx.' + contactXmpp + '.e\n'\
                           'on TxM and me.' + contactXmpp + '.e on RxM!\n'
 
-                    if raw_input('\nAre you sure? Type uppercase \'YES\' to continue: ' ) == 'YES':
+                    if raw_input('Are you sure? Type uppercase \'YES\' to continue: ' ) == 'YES':
                         command = 'TFCKF me.' + contactXmpp + ' me.' + keyFileName
                         print '\nTxM > RxM: Shred keyfile me.' + contactXmpp + '.e and start using \'me.' + keyFileName + '\''
 
@@ -2239,7 +2240,7 @@ while True:
             else:
                 short_msg_process(userInput, xmpp)
                 print_kf_status(xmpp)
-
+            time.sleep(0.1)
         time.sleep(0.1)
         print ''
 
