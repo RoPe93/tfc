@@ -9,7 +9,7 @@ import os
 import serial
 import subprocess
 import sys
-from time import sleep
+import time
 
 
 
@@ -51,14 +51,12 @@ displayTime        = True
 
 logTimeStampFmt    = '%Y-%m-%d / %H:%M:%S'
 displayTimeFmt     = '%H:%M'
-kfOWIterations     = 3
+keyOWIterations     = 3
 shredIterations    = 3
 keyThreshold       = 5
 PkgSize            = 140
 
 localTesting       = False
-
-
 
 if not localTesting:
     port        = serial.Serial('/dev/ttyAMA0', baudrate=9600, timeout=0.1)
@@ -469,10 +467,9 @@ def keccak_256(hashInput):
 
 def otp_decrypt(ciphertext, key):
     if len(ciphertext) == len(key):
-        plaintext = ''.join(chr(ord(encLetter) ^ ord(keyLetter)) for encLetter, keyLetter in zip(ciphertext, key))
+        return ''.join(chr(ord(ctChar) ^ ord(keyChar)) for ctChar, keyChar in zip(ciphertext, key))
     else:
         exit_with_msg('CRITICAL ERROR! Ciphertext - key length mismatch.')
-    return plaintext
 
 
 
@@ -518,15 +515,6 @@ def one_time_mac(key1, key2, ciphertext):
     b = len(iA)
 
 
-    # Print block values.
-    if debugging:
-        print '\nCiphertext integer values:\n'
-        for block in iA:
-            print 'Block ' + str(iA.index(block) + 1) + ' (Length = ' + str(len(str(block))) + ')'
-            print str(block) + '\n'
-        print ''
-
-
     #  Calculate MAC.
     n = 0
     while b > 0:
@@ -545,10 +533,6 @@ def one_time_mac(key1, key2, ciphertext):
     return MAC
 
 
-
-######################################################################
-#                    DECRYPTION AND KEY MANAGEMENT                   #
-######################################################################
 
 def get_keyset(xmpp, keyID, output):
     try:
@@ -595,7 +579,7 @@ def get_keyset(xmpp, keyID, output):
 def auth_and_decrypt(xmpp, ctWithTag, keyID):
 
     # Calculate offset of contact's keyset.
-    storedKeyID  = int(get_keyID(xmpp))
+    storedKeyID  = get_keyID(xmpp)
     contactKeyID = int(keyID)
     offset       = contactKeyID - storedKeyID
 
@@ -647,42 +631,51 @@ def auth_and_decrypt(xmpp, ctWithTag, keyID):
         return False, ''
 
 
-
 def overwrite_key(xmpp, keyID):
+
+    # Verify that keyID is positive.
     if keyID < 1:
-        exit_with_msg('Error: KeyID was not greater than 0! Check your contacts.tfc file.')
-    else:
-        offset = keyID * PkgSize
+        exit_with_msg('CRITICAL ERROR! KeyID was not valid.')
 
+    offset = keyID * PkgSize
+
+    # Display key before overwriting.
     if debugging:
-        print 'M(overwrite_enc_key):\nOverwriting ' + str(PkgSize) + ' bytes from offset ' + str(offset) + ' (keyID ' + str(keyID) + ')\n'
-        print 'M(overwrite_enc_key): Hex-representation of key before overwriting:'
+        print 'M(overwrite_key):\nOverwriting ' + str(PkgSize) + ' bytes from offset ' + str(offset) + ' (keyID ' + str(keyID) + ')\n'
+        print 'M(overwrite_key): Hex-representation of key before overwriting:'
         subprocess.Popen('hexdump -s' + str(offset) + ' -n ' + str(PkgSize) + ' ' + xmpp + '.e| cut -c 9-', shell=True).wait()
-    i = 0
 
-    while i < kfOWIterations:
+    # Overwrite key.
+    i = 0
+    while i < keyOWIterations:
         if debugging:
-            print 'M(overwrite_enc_key): Overwriting key with random data (iteration ' + str(i + 1) + ')'
+            print 'M(overwrite_key): Overwriting key with random data (iteration ' + str(i + 1) + ')'
         subprocess.Popen('dd if=/dev/urandom of=' + xmpp + '.e bs=1 seek=' + str(offset) + ' count=' + str(PkgSize) + ' conv=notrunc > /dev/null 2>&1', shell=True).wait()
 
         if debugging:
-            print 'M(overwrite_enc_key): Done. Hex-representation of key after overwriting:'
+            print 'M(overwrite_key): Done. Hex-representation of key after overwriting:'
             subprocess.Popen('hexdump -s' + str(offset) + ' -n ' + str(PkgSize) + ' ' + xmpp + '.e| cut -c 9-', shell=True).wait()
-        i +=1
+        i += 1
 
-    with open(xmpp + '.e', 'rb+') as eFile:
-        eFile.seek(offset)
-        eFile.write(PkgSize * '!')
-        eFile.seek(offset)
-        owCandidate = eFile.read(PkgSize)
-        while owCandidate != (PkgSize * '!'):
-            print '\nWARNING! Key overwrite failed, trying again\n'
-            eFile.seek(offset)
-            eFile.write(PkgSize * '!')
-            eFile.seek(offset)
-            owCandidate = eFile.read(PkgSize)
-        if debugging:
-            print '\nM(overwrite_key): Overwriting completed.\n'
+    # Overwrite key with '!' chars.
+    with open(xmpp + '.e', 'r+') as file:
+        file.seek(offset)
+        file.write(PkgSize * '!')
+
+        # Verify overwriting.
+        file.seek(offset)
+        writtenData = file.read(PkgSize)
+
+        while writtenData != (PkgSize * '!'):
+            os.system('clear')
+            print '\nWARNING! Failed to overwrite key. Retrying...\n'
+            file.seek(offset)
+            file.write(PkgSize * '!')
+            file.seek(offset)
+            writtenData = file.read(PkgSize)
+
+    if debugging:
+        print 'M(overwrite_key): Overwriting completed.\n'
 
 
 
@@ -707,7 +700,7 @@ def write_nick(xmpp, nick):
     try:
         contacts = []
 
-        with open ('rxc.tfc', 'r') as file:
+        with open('rxc.tfc', 'r') as file:
             csvData = csv.reader(file)
 
             for row in csvData:
@@ -715,7 +708,7 @@ def write_nick(xmpp, nick):
 
         nickChanged = False
 
-        for i in range( len(contacts) ):
+        for i in range(len(contacts)):
             if contacts[i][1] == xmpp:
                 contacts[i][0] = nick
                 nickChanged = True
@@ -746,7 +739,7 @@ def get_nick(xmpp):
             for row in csvData:
                 contacts.append(row)
 
-        for i in range( len(contacts) ):
+        for i in range(len(contacts)):
             if contacts[i][1] == xmpp:
                 nick = contacts[i][0]
                 return nick
@@ -770,7 +763,7 @@ def write_keyID(xmpp, keyID):
 
         keyIDChanged = False
 
-        for i in range(len(contacts) ):
+        for i in range(len(contacts)):
             if contacts[i][1] == xmpp:
                 contacts[i][2] = keyID
                 keyIDChanged   = True
@@ -806,7 +799,7 @@ def get_keyID(xmpp):
             for row in csvData:
                 contacts.append(row)
 
-        for i in range( len(contacts) ):
+        for i in range(len(contacts)):
             if contacts[i][1] == xmpp:
                 keyID = int(contacts[i][2])
 
@@ -887,10 +880,10 @@ def get_keyfile_list():
 
 def search_keyfiles():
     keyfiles  = []
-    keyfiles += [each for each in os.listdir('.') if each.endswith('.e')]
+    keyfiles += [file for file in os.listdir('.') if file.endswith('.e')]
     if not keyfiles:
-        exit_with_msg('Error: No keyfiles for contacts were found.\n'\
-                      'Make sure keyfiles are in same directory as Rx.py\n')
+        exit_with_msg('Error: No keyfiles for contacts were found.\n'
+                      'Make sure keyfiles are in same directory as Rx.py.')
 
 
 
@@ -914,9 +907,9 @@ YOUR LIFE DEPENDS ON IT, THE PRINTER AND SCANNER AS WELL.\n'''
 
 
 def overWriteIteratorCheck():
-    if kfOWIterations < 1:
+    if keyOWIterations < 1:
         print '''
-WARNING: kfOWIterations VALUE IS SET TO LESS
+WARNING: keyOWIterations VALUE IS SET TO LESS
 THAN 1 WHICH MEANS KEY IS NOT BEING OVERWRITTEN
 IMMEDIATELY AFTER USE!
 
@@ -997,7 +990,7 @@ def write_log_entry(nick, xmpp, message):
     message = message.strip('\n')
 
     with open('logs.' + xmpp + '.tfc', 'a+') as file:
-        file.write( datetime.datetime.now().strftime(logTimeStampFmt) + ' ' + nick + ': ' + message + '\n' )
+        file.write(datetime.datetime.now().strftime(logTimeStampFmt) + ' ' + nick + ': ' + message + '\n')
 
     if debugging:
         print '\nM(write_log_entry): Added log entry \n\'' + message + '\' for contact ' + xmpp + '\n'
@@ -1016,7 +1009,7 @@ def packet_anomality(errorType='', packetType=''):
     if errorType == 'replay:':
         print 'WARNING! Received a ' + packetType + ', the key-id of which is not valid!\n' \
               'This might indicate tampering or keyfile mismatch.'
-        errorMsg = 'AUTOMATIC LOG ENTRY: Replayed ' + packetType +' detected.'
+        errorMsg = 'AUTOMATIC LOG ENTRY: Possibly replayed ' + packetType +' detected.'
 
     if errorType == 'tamper':
         print 'WARNING! Received a ' + packetType + ' that appears to be malformed!\n'\
@@ -1030,8 +1023,8 @@ def packet_anomality(errorType='', packetType=''):
 
     if errorType == 'hash':
         print 'WARNING! The hash of received long ' + packetType + ' failed!\n' \
-              'The file was rejected.'
-        errorMsg = 'AUTOMATIC LOG ENTRY: hash error in long ' + packetType + '.'
+              'The ' + packetType + ' was rejected.'
+        errorMsg = 'AUTOMATIC LOG ENTRY: Hash error in long ' + packetType + '.'
 
     if logTamperingEvent:
         with open('syslog.tfc', 'a+') as file:
@@ -1057,20 +1050,24 @@ def store_file(preName, fileName):
 
     if os.path.isfile(fileName):
         os.system('clear')
-        print '\nError: file already exists. Please use different file name.\n'
+        print '\nError: File already exists. Please use different file name.\n'
         return None
 
     if fileName != 'r':
         os.system('clear')
+
         subprocess.Popen('base64 -d f.' + preName + '.tfc > ' + fileName, shell=True).wait()
         print '\nStored tmp file \'f.' + preName + '.tfc\' as \'' + fileName + '\'.'
-        subprocess.Popen('shred -n ' + str(kfOWIterations) + ' -z -u f.' + preName + '.tfc', shell=True).wait()
+
+        subprocess.Popen('shred -n ' + str(keyOWIterations) + ' -z -u f.' + preName + '.tfc', shell=True).wait()
         print 'Temporary file \'f.' + preName + '.tfc\' has been overwritten.\n'
+
         disp_opsec_warning()
 
     else:
         os.system('clear')
-        subprocess.Popen('shred -n ' + str(kfOWIterations) + ' -z -u f.' + preName + '.tfc', shell=True).wait()
+
+        subprocess.Popen('shred -n ' + str(keyOWIterations) + ' -z -u f.' + preName + '.tfc', shell=True).wait()
         print 'Temporary file \'f.' + preName + '.tfc\' was rejected and overwritten.\n'
 
 
@@ -1142,7 +1139,7 @@ if fileSavingAllowed:
 
 try:
     while True:
-        sleep(0.01)
+        time.sleep(0.01)
         receivedPacket = ''
 
         if localTesting:
@@ -1233,7 +1230,7 @@ try:
                             continue
 
                         else:
-                            print '\nLogging settings can not be altered: Boolean\n'\
+                            print '\nLogging settings can not be altered:\nBoolean'\
                                   'value \'logChangeAllowed\' is set to False.\n'
                             continue
 
@@ -1365,7 +1362,7 @@ try:
                         f = file
 
                     First character:
-                        s = short packet: message can be shown or stored immediately.
+                        s = short packet: message/file can be shown or stored immediately.
 
                         l = first     packet of long msg / file
                         a = appended  packet of long msg / file
@@ -1419,9 +1416,9 @@ try:
                                 if xmpp.startswith('rx.'):
                                     print 'Contact \'' + xmpp[3:] + '\' cancelled file transmission.\n'
 
-                                fileReceived[xmpp] = True
-                                fileOnWay[xmpp]    = False
-                                fileA[xmpp]        = decryptedPacket[2:]
+                            fileReceived[xmpp] = True
+                            fileOnWay[xmpp]    = False
+                            fileA[xmpp]        = decryptedPacket[2:]
 
 
                     # Short message.
@@ -1557,8 +1554,8 @@ try:
                         # Log messages if logging is enabled.
                         if logMessages:
                             if nick.startswith('Me > '):
-                                spacing = len(get_nick('rx' + xmpp[2:]))
-                                nick    = (spacing - 2) * ' ' + 'Me'
+                                spacing = len(get_nick('rx' + xmpp[2:])) - 2
+                                nick    = spacing * ' ' + 'Me'
                                 write_log_entry(nick, xmpp[3:], message[xmpp])
                             else:
                                 write_log_entry(nick[5:], xmpp[3:], message[xmpp])

@@ -222,7 +222,6 @@ def networkTransmitter():
                         subprocess.Popen('killall pidgin', shell=True).wait()
 
                     sleep(0.1)                                                # Sleep allows local Rx.py some time to exit cleanly
-
                     subprocess.Popen('killall python', shell=True).wait()     # Note that this kills all python programs, not only NH.py
 
                 # Clear screens.
@@ -257,14 +256,13 @@ def networkTransmitter():
                             print rcdPkg + '\n'
 
                     else:
-                        print '\nCRC checksum error: Message was not forwarded to RxM or recipient.'
-                        print 'Please try sending the message again.'
-                        print '\nIf this error is persistent, check the batteries of your TxM data diode.\n'
+                        print '\nCRC checksum error: Message was not forwarded to RxM' \
+                              ' or recipient. Please try sending the message again.\n' \
+                              'If this error is persistent, check the batteries of your TxM data diode.\n'
 
 
                 # Relay message to RxM and Pidgin.
                 if rcdPkg.startswith('<mesg>'):
-
                     message                  = (rcdPkg[6:]).strip('\n')
                     xmpp, msgContent, crcPkg = message.split('~')
                     crcCalc                  = crc32(msgContent[5:])
@@ -284,9 +282,9 @@ def networkTransmitter():
                             print msgContent + '\n'
 
                     else:
-                        print '\nCRC checksum error: Message was not forwarded to RxM or recipient.'
-                        print '\nPlease try sending the message again.'
-                        print '\nIf this error is persistent, check the batteries of your TxM data diode.\n'
+                        print '\nCRC checksum error: Message was not forwarded to RxM'  \
+                              ' or recipient.\nPlease try sending the message again.\n' \
+                              'If this error is persistent, check the batteries of your TxM data diode.\n'
             clearLocalMsg()
 
         except OSError:

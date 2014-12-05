@@ -474,7 +474,7 @@ def otp_encrypt(plaintext, key):
 def one_time_mac(key1, key2, ciphertext):
 
     # One-time MAC calculation is done modulo M521, the 13th, 521-bit Mersenne prime.
-    q   = 6864797660130609714981900799081393217269435300143305409394463459185543183397656052122559640661454554977296311391480858037121987999716643812574028291115057151
+    q = 6864797660130609714981900799081393217269435300143305409394463459185543183397656052122559640661454554977296311391480858037121987999716643812574028291115057151
 
     if debugging:
         print 'M(one_time_mac):'
@@ -501,15 +501,6 @@ def one_time_mac(key1, key2, ciphertext):
     b = len(iA)
 
 
-    # Print block values.
-    if debugging:
-        print '\nCiphertext integer values:\n'
-        for block in iA:
-            print 'Block ' + str(iA.index(block) + 1) + ' (Length = ' + str(len(str(block))) + ')'
-            print str(block) + '\n'
-        print ''
-
-
     #  Calculate MAC.
     n = 0
     while b > 0:
@@ -531,10 +522,6 @@ def one_time_mac(key1, key2, ciphertext):
     return MAC
 
 
-
-######################################################################
-#                    ENCRYPTION AND KEY MANAGEMENT                   #
-######################################################################
 
 def get_keyset(xmpp, keyID, output):
     try:
@@ -592,7 +579,7 @@ def encrypt(xmpp, pt):
     ct     = otp_encrypt(pt, keySet[0])
     tag    = one_time_mac(keySet[1], keySet[2], ct)
 
-    overwrite_enc_key(xmpp, keyID)
+    overwrite_key(xmpp, keyID)
     write_keyID(xmpp, keyID + 1)
 
     return ct + tag
@@ -614,12 +601,15 @@ def new_keyfile():
 
 
 
-def overwrite_enc_key(xmpp, keyID):
+
+
+
+def overwrite_key(xmpp, keyID):
 
     # Store hash of key to blacklist.
     if checkKeyHashes:
         if debugging:
-            print 'M(overwrite_enc_key): Loading key for hash writing\n'
+            print 'M(overwrite_key): Loading key for hash writing\n'
         key = get_keyset(xmpp, keyID, False)
         write_used_key_hash(key)
 
@@ -632,18 +622,19 @@ def overwrite_enc_key(xmpp, keyID):
 
     # Display key before overwriting.
     if debugging:
-        print 'M(overwrite_enc_key): Overwriting ' + str(PkgSize) + ' bytes from offset ' + str(offset) + ' (keyID ' + str(keyID) + ')\n'
-        print 'M(overwrite_enc_key): Hex representation of key before overwriting:'
+        print 'M(overwrite_key):\nOverwriting ' + str(PkgSize) + ' bytes from offset ' + str(offset) + ' (keyID ' + str(keyID) + ')\n'
+        print 'M(overwrite_key): Hex-representation of key before overwriting:'
         subprocess.Popen('hexdump -s' + str(offset) + ' -n ' + str(PkgSize) + ' ' + xmpp + '.e| cut -c 9-', shell=True).wait()
 
     # Overwrite key.
     i = 0
     while i < keyOWIterations:
         if debugging:
-            print 'M(overwrite_enc_key): Overwriting key with random data (iteration ' + str(i + 1) + ')'
+            print 'M(overwrite_key): Overwriting key with random data (iteration ' + str(i + 1) + ')'
         subprocess.Popen('dd if=/dev/urandom of=' + xmpp + '.e bs=1 seek=' + str(offset) + ' count=' + str(PkgSize) + ' conv=notrunc > /dev/null 2>&1', shell=True).wait()
+
         if debugging:
-            print 'M(overwrite_enc_key): Done. Hex-representation of key after overwriting:'
+            print 'M(overwrite_key): Done. Hex-representation of key after overwriting:'
             subprocess.Popen('hexdump -s' + str(offset) + ' -n ' + str(PkgSize) + ' ' + xmpp + '.e| cut -c 9-', shell=True).wait()
         i += 1
 
@@ -665,7 +656,7 @@ def overwrite_enc_key(xmpp, keyID):
             writtenData = file.read(PkgSize)
 
     if debugging:
-        print 'M(overwrite_enc_key): Overwriting completed.\n'
+        print 'M(overwrite_key): Overwriting completed.\n'
 
 
 
@@ -703,7 +694,7 @@ def write_nick(xmpp, nick):
     try:
         contacts = []
 
-        with open ('txc.tfc', 'r') as file:
+        with open('txc.tfc', 'r') as file:
             csvData = csv.reader(file)
 
             for row in csvData:
@@ -711,7 +702,7 @@ def write_nick(xmpp, nick):
 
         nickChanged = False
 
-        for i in range( len(contacts) ):
+        for i in range(len(contacts)):
             if contacts[i][1] == xmpp:
                 contacts[i][0] = nick
                 nickChanged = True
@@ -742,7 +733,7 @@ def get_nick(xmpp):
             for row in csvData:
                 contacts.append(row)
 
-        for i in range( len(contacts) ):
+        for i in range(len(contacts)):
             if contacts[i][1] == xmpp:
                 nick = contacts[i][0]
                 return nick
@@ -772,7 +763,7 @@ def write_keyID(xmpp, keyID):
                 keyIDChanged   = True
 
         if not keyIDChanged:
-            exit_with_msg('ERROR! Could not find ' + xmpp + ' from txc.tfc.')
+            exit_with_msg('ERROR! Could not find XMPP\n' + xmpp + ' from txc.tfc.')
 
         with open('txc.tfc', 'w') as file:
             writer = csv.writer(file)
@@ -810,10 +801,10 @@ def get_keyID(xmpp):
         if keyID > 0:
             return keyID
         else:
-            exit_with_msg('ERROR! Failed to load valid keyID for ' + xmpp + '.')
+            exit_with_msg('ERROR! Failed to load valid keyID for XMPP\n' + xmpp + '.')
 
     except ValueError:
-        exit_with_msg('ERROR! Failed to load valid keyID for ' + xmpp + '.')
+        exit_with_msg('ERROR! Failed to load valid keyID for XMPP\n' + xmpp + '.')
 
     except IOError:
         exit_with_msg('ERROR! txc.tfc could not be loaded. Exiting.')
@@ -1010,7 +1001,7 @@ def overWriteIteratorCheck():
 #                           MSG PROCESSING                           #
 ######################################################################
 
-def b64e(content):
+def base64_encode(content):
     import base64
     return base64.b64encode(content)
 
@@ -1108,7 +1099,7 @@ def long_msg_process(userInput, xmpp):
             paddedMsg = padding(packet)
             ctWithTag = encrypt(xmpp, paddedMsg)
 
-            encoded   = b64e(ctWithTag)
+            encoded   = base64_encode(ctWithTag)
             checksum  = crc32(encoded + '|' + str(keyID))
 
             output_message(xmpp, encoded, keyID, checksum)
@@ -1139,7 +1130,7 @@ def long_msg_process(userInput, xmpp):
             paddedMsg = padding(cancelMsg)
             ctWithTag = encrypt(xmpp, paddedMsg)
 
-            encoded   = b64e(ctWithTag)
+            encoded   = base64_encode(ctWithTag)
             checksum  = crc32(encoded + '|' + str(keyID))
 
             output_message(xmpp, encoded, keyID, checksum)
@@ -1165,7 +1156,7 @@ def short_msg_process(plaintext, xmpp):
     paddedMsg = padding('s' + plaintext) # 's' stands for single packet messages.
     ctWithTag = encrypt(xmpp, paddedMsg)
 
-    encoded  = b64e(ctWithTag)
+    encoded  = base64_encode(ctWithTag)
     checksum = crc32(encoded + '|' + str(keyID))
 
     output_message(xmpp, encoded, keyID, checksum)
@@ -1179,7 +1170,7 @@ def cmd_msg_process(command):
     paddedCmd = padding(command)
     ctWithTag = encrypt('tx.local', paddedCmd)
 
-    encoded   = b64e(ctWithTag)
+    encoded   = base64_encode(ctWithTag)
     checksum  = crc32(encoded + '|' + str(keyID))
 
     output_command(encoded, keyID, checksum)
