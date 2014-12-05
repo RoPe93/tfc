@@ -51,7 +51,7 @@ displayTime        = True
 
 logTimeStampFmt    = '%Y-%m-%d / %H:%M:%S'
 displayTimeFmt     = '%H:%M'
-keyOWIterations     = 3
+keyOWIterations    = 3
 shredIterations    = 3
 keyThreshold       = 5
 PkgSize            = 140
@@ -631,6 +631,7 @@ def auth_and_decrypt(xmpp, ctWithTag, keyID):
         return False, ''
 
 
+
 def overwrite_key(xmpp, keyID):
 
     # Verify that keyID is positive.
@@ -908,21 +909,18 @@ YOUR LIFE DEPENDS ON IT, THE PRINTER AND SCANNER AS WELL.\n'''
 
 def overWriteIteratorCheck():
     if keyOWIterations < 1:
-        print '''
-WARNING: keyOWIterations VALUE IS SET TO LESS
-THAN 1 WHICH MEANS KEY IS NOT BEING OVERWRITTEN
-IMMEDIATELY AFTER USE!
-
-THIS MIGHT BE VERY DANGEROUS FOR PHYSICAL SECURITY
-AS ANY ATTACKER WHO GETS ACCESS TO KEYS, CAN LATER
-DECRYPT INTERCEPTED CIPHERTEXTS. INCREASE THE VALUE
-TO 1 OR PREFERABLY HIGHER TO FIX THIS PROBLEM.
-
-IF YOU ARE SURE ABOUT NOT OVERWRITING, MANUALLY
-COMMENT OUT THE overWriteIteratorCheck FUNCTION CALL
-FROM PRE-LOOP OF Tx.py TO DISABLE THIS WARNING.
-
-EXITING Tx.py'''
+        os.system('clear')
+        print 'WARNING: keyOWIterations VALUE IS SET TO LESS\n'       \
+              'THAN 1 WHICH MEANS KEY IS NOT BEING OVERWRITTEN\n'     \
+              'IMMEDIATELY AFTER USE!\n\n'                            \
+              'THIS MIGHT BE VERY DANGEROUS FOR PHYSICAL SECURITY\n'  \
+              'AS ANY ATTACKER WHO GETS ACCESS TO KEYS, CAN LATER\n'  \
+              'DECRYPT INTERCEPTED CIPHERTEXTS. INCREASE THE VALUE\n' \
+              'TO 1 OR PREFERABLY HIGHER TO FIX THIS PROBLEM.\n\n'    \
+              'IF YOU ARE SURE ABOUT NOT OVERWRITING, MANUALLY\n'     \
+              'COMMENT OUT THE overWriteIteratorCheck FUNCTION CALL\n'\
+              'FROM PRE-LOOP OF Tx.py TO DISABLE THIS WARNING.\n\n'  \
+              'EXITING TFC.\n\n'
         exit()
 
 
@@ -1069,8 +1067,6 @@ def store_file(preName, fileName):
 
         subprocess.Popen('shred -n ' + str(keyOWIterations) + ' -z -u f.' + preName + '.tfc', shell=True).wait()
         print 'Temporary file \'f.' + preName + '.tfc\' was rejected and overwritten.\n'
-
-
 
 
 

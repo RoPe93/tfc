@@ -601,9 +601,6 @@ def new_keyfile():
 
 
 
-
-
-
 def overwrite_key(xmpp, keyID):
 
     # Store hash of key to blacklist.
@@ -995,6 +992,7 @@ def overWriteIteratorCheck():
               'FROM PRE-LOOP OF Tx.py TO DISABLE THIS WARNING.\n\n'  \
               'EXITING TFC.\n\n'
         exit()
+
 
 
 ######################################################################
