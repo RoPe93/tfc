@@ -51,21 +51,24 @@ Dieharder       = False     # Use Dieharder suite (diehard battery of tests and
 
 createCopies    = False     # Create copies of key for your and recipient's RxM.
 
+
+
 ######################################################################
 #                              ARGUMENTS                             #
 ######################################################################
 
 # Initial Values, do not edit.
-HWRNGEntropy    = False
-kernelEntropy   = False
-mixedEntropy    = False
-defOFile        = False
+HWRNGEntropy  = False
+kernelEntropy = False
+mixedEntropy  = False
+defOutputFile = False
+os.chdir(sys.path[0])
 
 
 
 def showHelp():
-    print '\nUsage: python genKey.py [OPTIONS]... OUTPUT_FILE\n\n'                         \
-    '  -k, --kernel'    + 7  * ' ' + 'Use /dev/(u)random as entropy source.\n'             \
+    print '\nUsage: python genKey.py [OPTIONS]... OUTPUT_FILE\n\n'                        \
+    '  -k, --kernel'    + 7  * ' ' + 'Use /dev/(u)random as entropy source.\n'            \
     '  -h, --hwrng'     + 8  * ' ' + 'Use HWRNG as entropy source.\n'                     \
     '  -x, --mixed'     + 8  * ' ' + 'Use HWRNG as source and XOR it with equal amount\n' \
                         + 21 * ' ' + 'of entropy from kernel. (Most secure option).\n\n'
@@ -80,48 +83,47 @@ except IndexError:
     showHelp()
 
 
+
 try:
     outputFile = str(sys.argv[2])
 
 except IndexError:
-    defOFile = True
+    defOutputFile = True
 
+
+
+selModes = 0
 
 if '-k' in command or '--kernel' in command:
-    kernelEntropy   = True
+    kernelEntropy = True
+    selModes     += 1
+
     if useDevRandom:
-        mode        = 'Kernel entropy (/dev/random)'
+        mode      = 'Kernel entropy (/dev/random)'
     else:
-        mode        = 'Kernel entropy (/dev/urandom)'
+        mode      = 'Kernel entropy (/dev/urandom)'
 
 
 if '-h' in command or '--hwnrg' in command:
-    HWRNGEntropy    = True
-    mode            = 'HWRNG entropy'
+    HWRNGEntropy = True
+    selModes    += 1
+    mode         = 'HWRNG entropy'
 
 
 if '-x' in command or '--mixed' in command:
-    mixedEntropy    = True
+    mixedEntropy = True
+    selModes    += 1
 
     if useDevRandom:
-        mode        = 'Mixed entropy (HWRNG XOR /dev/random)'
+        mode     = 'Mixed entropy (HWRNG XOR /dev/random)'
     else:
-        mode        = 'Mixed entropy (HWRNG XOR /dev/urandom)'
+        mode     = 'Mixed entropy (HWRNG XOR /dev/urandom)'
+
 
 
 # Check that only one mode of operation is selected.
-selModes = 0
-if kernelEntropy:
-    selModes += 1
-if HWRNGEntropy:
-    selModes += 1
-if mixedEntropy:
-    selModes += 1
-
 if selModes != 1:
     showHelp()
-
-os.chdir(sys.path[0])
 
 
 
@@ -333,10 +335,9 @@ class Keccak:
         output =''.join(output).upper()
         return output
 
+
+
     ### Padding function
-
-
-
     def pad(self,M, n):
         """Pad M with reverse-padding to reach a length multiple of n
 
@@ -531,36 +532,48 @@ def keccak_256(hashInput):
 
 def get_hwrng_entropy():
 
+    # Collect entropy from HWRNG.
     print 'Sampling randomness from HWRNG device. End with Ctrl + C\n'
     try:
         subprocess.Popen('sudo ./getEntropy', shell=True).wait()
     except KeyboardInterrupt:
         pass
 
+
+    # Clean messages after user issues KeyboardInterrupt.
     os.system('clear')
     print '\nTFC ' + version + ' || Key generator || Mode: ' + mode + '\n\n'
-    if defOFile:
+    if defOutputFile:
         print 'Specified output file: ' + outputFile + '\n'
     print 'Sampling randomness from HWRNG device. End with Ctrl + C\nEnded by user.'
 
+
+    # Apply vonNeumann whitening.
     print '\nApplying VN whitening on entropy...'
     subprocess.Popen('cat ' + 'HWRNGEntropy' + ' | ./deskew > ' + 'whitened', shell=True).wait()
 
+
+    # Read whitened entropy.
     print 'Done.\n\nReading whitened data...'
     with open('whitened', 'r') as file:
         binaryString = file.readline()
 
+
     # Convert '1011011101011...' to binary string.
     entropy = ''.join(chr(int(binaryString[i:i+8], 2)) for i in xrange(0, len(binaryString), 8))
 
+
+    # Overwrite temporary files.
     print 'Done.\n\nOverwriting HWRNG tmp files...'
     subprocess.Popen('sudo shred -n ' + str(shredIterations) + ' -z -u HWRNGEntropy whitened', shell=True).wait()
 
-    # Calculate entropy size.
-    entropySize = len(entropy)
 
+    # Calculate and print entropy size.
+    entropySize = len(entropy)
     print 'Done.\n\nObtained ' + str(entropySize) + ' bytes (' + str(entropySize / 420) + ' default len msg) of entropy from HWRNG.'
 
+
+    # Return collecter entropy and it's size.
     return entropy, entropySize
 
 
@@ -570,28 +583,41 @@ def get_kernel_entropy(size=0):
     # If requested size is set to 0, generate entropy until user halts.
     if size == 0:
         try:
+
+            # Collect entropy from /dev/random.
             print 'Sampling randomness from kernel entropy. End with Ctrl + C'
             if useDevRandom:
                 subprocess.Popen('dd if=/dev/random of=tmpEntropy conv=notrunc > /dev/null 2>&1', shell=True).wait()
             else:
                 subprocess.Popen('dd if=/dev/urandom of=tmpEntropy conv=notrunc > /dev/null 2>&1', shell=True).wait()
+
         except KeyboardInterrupt:
             pass
 
+
+        # Clean messages after user issues KeyboardInterrupt.
         os.system('clear')
         print '\nTFC ' + version + ' || Key generator || Mode: ' + mode + '\n\n'
-        if defOFile:
+        if defOutputFile:
             print 'Specified output file: ' + outputFile + '\n'
         print 'Sampling randomness from kernel entropy. End with Ctrl + C\nEnded by user.'
 
+
+        # Read entropy from file.
         with open('tmpEntropy', 'rb') as file:
             entropy = file.readlines()
 
+
+        # Join entropy lines.
         entropy = ''.join(entropy)
 
+
+        # Shred temporary entropy file.
         print '\nOverwriting tmp files...'
         subprocess.Popen('sudo shred -n ' + str(shredIterations) + ' -z -u tmpEntropy', shell=True).wait()
-    
+
+
+        # Calculate and print entropy size.
         entropySize = len(entropy)
         print 'Done.\n\nObtained ' + str(entropySize) + ' bytes of entropy from Kernel.'
         print 'This equals ' + str(entropySize / 140) + ' default 140-char messages.\n'
@@ -604,29 +630,38 @@ def get_kernel_entropy(size=0):
     if size > 0:
 
         if useDevRandom:
-            subprocess.Popen('head -c ' + str(size) + ' /dev/random > kernel_ent',   shell=True).wait()
+            print '\nLoading ' + str(size) + ' bytes of entropy from /dev/random...'
         else:
-            subprocess.Popen('head -c ' + str(size) + ' /dev/urandom > kernel_ent',   shell=True).wait()
+            print '\nLoading ' + str(size) + ' bytes of entropy from /dev/urandom...'
 
-        with open('kernel_ent', 'rb') as file:
-            entropy = file.readlines()
-        
-        entropy = ''.join(entropy)
-    
-        # Verify that correct amount of entropy was obtained.
+        entropy = ''
+
+        # Collect entropy from /dev/(u)random.
         while len(entropy) != size:
-            print 'Entropy collection from /dev/(u)random failed. Trying again...'
-    
             if useDevRandom:
                 subprocess.Popen('head -c ' + str(size) + ' /dev/random > kernel_ent',   shell=True).wait()
             else:
                 subprocess.Popen('head -c ' + str(size) + ' /dev/urandom > kernel_ent',   shell=True).wait()
-    
-            with open('kernel_ent', 'rb') as file:
-                entropy = file.readline()
 
-        print '\nShredding kernel entropy tmp file...'
+
+            # Read entropy from file.
+            with open('kernel_ent', 'rb') as file:
+                entropy = file.readlines()
+
+
+            # Join entropy lines.
+            entropy = ''.join(entropy)
+
+
+            # Print warning if not enough entropy and this while-loop is restarted.
+            if len(entropy) != size:
+                print 'Entropy collection from /dev/(u)random failed. Trying again...'
+
+
+        # Shred temporary entropy file.
+        print 'Done.\n\nShredding kernel entropy tmp file...'
         subprocess.Popen('shred -n ' + str(shredIterations) + ' -z -u kernel_ent', shell=True).wait()
+
 
     else:
         os.system('clear')
@@ -644,7 +679,7 @@ os.system('clear')
 print '\nTFC ' + version + ' || Key generator || Mode: ' + mode + '\n\n'
 
 
-if defOFile:
+if defOutputFile:
     try:
         outputFile = raw_input('No output file specified. Please enter output file name: ')
         print ''
@@ -653,24 +688,28 @@ if defOFile:
         print '\nExiting genKey.py\n'
         exit()
 
+
+
 if outputFile.startswith('-'):
     os.system('clear')
     print '\nError: Keyfile can not start with \'-\'. Exiting.\n'
     exit()
 
 
+
 if kernelEntropy:
     entropy = get_kernel_entropy()
+
 
 
 if HWRNGEntropy:
     entropy, HWentropySize = get_hwrng_entropy()
 
 
-if mixedEntropy:
 
-    HWEntropy, entropy1size = get_hwrng_entropy()
-    KernelEntropy           = get_kernel_entropy(entropy1size)
+if mixedEntropy:
+    HWEntropy, hwEntSize = get_hwrng_entropy()
+    KernelEntropy        = get_kernel_entropy(hwEntSize)
 
     print 'Done.\n\nXORing HWRNG and kernel entropy...'
 
@@ -679,40 +718,41 @@ if mixedEntropy:
         entropy = ''.join(chr(ord(HWRNGByte) ^ ord(KernelByte)) for HWRNGByte, KernelByte in zip(HWEntropy, KernelEntropy))
     else:
         os.system('clear')
-        print '\nERROR: Length mismatch when XORing HWRNG entropy with kernel entropy. Exiting.\n'
+        print '\nERROR: HWRNG - Kernel entropy length mismatch. Exiting.\n'
         exit()
 
 if keccakWhitening:
 
-    # Split entropy to 256-bit blocks
+    # Split entropy to 256-bit blocks.
     entropyBlocks = [entropy[x:x+32] for x in range(0, len(entropy), 32)]
-    entropy       = ''
 
     # Hash each block separately and create new entropy string.
+    entropy       = ''
+
     for block in entropyBlocks:
         os.system('clear')
         print 'Whitening entropy with Keccak...\n\nBlock ' + str(entropyBlocks.index(block)) + ' of ' + str(len(entropyBlocks))
-        whitened = binascii.unhexlify( keccak_256(str(block)) )
+        whitened = binascii.unhexlify(keccak_256(str(block)))
         entropy  = entropy + whitened
 
 
-if HWRNGEntropy:
+if mixedEntropy:
     print 'Done.\n'
 
-print 'Storing entropy file...'
+if HWRNGEntropy:
+    print ''
 
+#Store keyfile.
+print 'Storing entropy file...'
 with open(outputFile, 'wb') as file:
     file.write(entropy)
 
 
 
-#########################################################
-#               EVALUATE KEYFILE ENTROPY                #
-#########################################################
-
-ttyw = int(subprocess.check_output(['stty', 'size']).split()[1])
+# Evaluate keyfile entropy.
 
 if EntAnalyze:
+    ttyw = int(subprocess.check_output(['stty', 'size']).split()[1])
     print 'Done.\n\n' + ttyw * '-' + 'Entropy evaluation of final keyfile:\n'
     subprocess.Popen('ent ' + outputFile, shell=True).wait()
     print ttyw * '-'
@@ -724,8 +764,8 @@ if Dieharder:
         keyFileSize = file.tell()
 
     if (keyFileSize < 12582912):
-        print '\n\nWarning: Dieharder is meant to be used with files ' \
-              'larger than 12MB! Results may not be accurate.\n'
+        print '\n\nWarning: Entropy file size is less than recommended 12MB! ' \
+              'Dieharder results may not be accurate.\n'
 
     print '\n\nInitializing Dieharder battery of ' \
           'tests to evaluate quality of final keyfile'
@@ -734,17 +774,14 @@ if Dieharder:
 
 
 
-#########################################################
-#               MAKE COPIES OF KEYFILE                  #
-#########################################################
-
+# Create copies of keyfile createCopies is enabled.
 if createCopies:
     print '\nCreating copies of key...'
     subprocess.Popen('cp ' + outputFile + ' me.' + outputFile, shell=True).wait()
     subprocess.Popen('cp ' + outputFile + ' rx.' + outputFile + '_for_recipient', shell=True).wait()
 
 
-print 'Done.\n\nKeyfile generation successful.\nExiting.\n\n'
+print '\nKeyfile generation successful.\nExiting.\n\n'
 exit()
 
 
