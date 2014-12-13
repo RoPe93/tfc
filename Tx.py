@@ -1731,8 +1731,13 @@ while True:
             print 'Current groups and their members: '
             for group in groupFileList:
                 print '   ' + group
-                for member in get_group_members(group):
+
+                if not get_group_members(group, False):
+                    print '       Empty group'
+
+                for member in get_group_members(group, False):
                     print '     - ' + member
+
         print ''
         continue
 
